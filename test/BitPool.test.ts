@@ -20,7 +20,7 @@ Deno.test("BitPool - constructor should throw RangeError for size > 0xffffffff",
   assertThrows(
     () => new BitPool(0x100000000),
     RangeError,
-    '"value" must be smaller than or equal to 4294967295',
+    '"value" must be smaller than or equal to 536870911.',
   );
 });
 
