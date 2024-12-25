@@ -7,12 +7,67 @@
 
 import { BooleanArray } from "@phughesmcr/booleanarray";
 
+/** Convenience function to check if a value is greater than zero */
+function isGreaterThanZero(value: number): boolean {
+  return value > 0;
+}
+
 /**
  * A pool of single bits backed by a Uint32Array.
  */
 export class BitPool extends BooleanArray {
   /** The next available index in the bitpool */
   #nextAvailableIndex: number;
+
+  /**
+   * Creates a new Bitpool from an array of numbers
+   * @param arr The array of numbers to create the Bitpool from
+   * @param capacity The capacity of the Bitpool
+   * @returns a new Bitpool
+   */
+  static override fromArray(arr: number[], capacity: number): BitPool {
+    if (capacity <= 0) {
+      throw new RangeError('"value" must be greater than 0');
+    }
+    if (capacity < arr.length * BooleanArray.BITS_PER_INT) {
+      throw new RangeError(
+        `For the array to fit, "capacity" must be greater than or equal to ${arr.length * BooleanArray.BITS_PER_INT}`,
+      );
+    }
+    const pool = new BitPool(capacity);
+
+    // Set all bits to 1 initially (available)
+    pool.setAll();
+
+    for (let i = 0; i < arr.length; i++) {
+      const value = arr[i];
+
+      // Validate each value
+      if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+        throw new TypeError('"value" must be a safe integer');
+      }
+      if (value < 0) {
+        throw new RangeError('"value" must be greater than or equal to 0');
+      }
+
+      // Each value represents a 32-bit chunk
+      const baseIndex = i * BooleanArray.BITS_PER_INT;
+
+      // For each bit in the current value
+      for (let bitPos = 0; bitPos < BooleanArray.BITS_PER_INT; bitPos++) {
+        const absolutePosition = baseIndex + bitPos;
+        if (absolutePosition >= capacity) break;
+
+        // If the bit is 0 in the input, mark it as occupied (false in our pool)
+        if ((value & (1 << bitPos)) === 0) {
+          pool.setBool(absolutePosition, false);
+        }
+      }
+    }
+
+    pool.refresh();
+    return pool;
+  }
 
   /**
    * Creates a new Bitpool with the specified capacity
@@ -92,6 +147,34 @@ export class BitPool extends BooleanArray {
     }
 
     return -1;
+  }
+
+  /**
+   * Reset the nextAvailableIdx value
+   * @param nextAvailableIndex The index to attempt to set the nextAvailableIdx to. Will fallback to the first available index if not available.
+   * @returns the bitpool
+   * @note you should probably never have to call this manually
+   */
+  refresh(nextAvailableIndex?: number): this {
+    // If the nextAvailableIndex is provided, we need to validate it
+    if (typeof nextAvailableIndex === "number") {
+      if (isNaN(nextAvailableIndex)) {
+        throw new TypeError('"nextAvailableIndex" must be a number');
+      }
+      if (nextAvailableIndex < 0 || nextAvailableIndex >= this.length) {
+        throw new RangeError(
+          `"nextAvailableIndex" must be within the bounds of the Bitpool (Between 0 and ${this.length - 1})`,
+        );
+      }
+      // If the bit at the specified index is available, we need to update the nextAvailableIndex
+      if (this[nextAvailableIndex] !== 0) {
+        this.#nextAvailableIndex = nextAvailableIndex;
+        return this;
+      }
+    }
+    // Fallback to finding the next available index using the default findIndex function
+    this.#nextAvailableIndex = this.findIndex(isGreaterThanZero);
+    return this;
   }
 
   /**

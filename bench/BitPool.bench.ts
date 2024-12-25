@@ -243,3 +243,226 @@ Deno.bench({
     pool.release(SMALL_POOL_SIZE + 1);
   },
 });
+
+// fromArray benchmarks
+Deno.bench({
+  name: "BitPool.fromArray - small array (1 word)",
+  group: "fromArray",
+  fn: () => {
+    BitPool.fromArray([0b11110000], 32);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - medium array (4 words)",
+  group: "fromArray",
+  fn: () => {
+    BitPool.fromArray([0b11110000, 0b00001111, 0b10101010, 0b01010101], 128);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - large array (32 words)",
+  group: "fromArray",
+  fn: () => {
+    const arr = Array(32).fill(0b10101010);
+    BitPool.fromArray(arr, 1024);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - sparse array (mostly zeros)",
+  group: "fromArray",
+  fn: () => {
+    const arr = Array(16).fill(0);
+    arr[0] = 0b00000001;
+    arr[15] = 0b10000000;
+    BitPool.fromArray(arr, 512);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - dense array (mostly ones)",
+  group: "fromArray",
+  fn: () => {
+    const arr = Array(16).fill(0xFFFFFFFF);
+    arr[0] = 0xFFFFFFFE;
+    arr[15] = 0x7FFFFFFF;
+    BitPool.fromArray(arr, 512);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - alternating pattern",
+  group: "fromArray",
+  fn: () => {
+    const arr = Array(8).fill(0).map((_, i) => i % 2 === 0 ? 0xAAAAAAAA : 0x55555555);
+    BitPool.fromArray(arr, 256);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - empty array with large capacity",
+  group: "fromArray",
+  fn: () => {
+    BitPool.fromArray([], 1000);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - single bit set",
+  group: "fromArray",
+  fn: () => {
+    BitPool.fromArray([1], 32);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - all bits set",
+  group: "fromArray",
+  fn: () => {
+    const arr = Array(4).fill(0xFFFFFFFF);
+    BitPool.fromArray(arr, 128);
+  },
+});
+
+Deno.bench({
+  name: "BitPool.fromArray - capacity much larger than array",
+  group: "fromArray",
+  fn: () => {
+    BitPool.fromArray([0xAAAAAAAA], 1000);
+  },
+});
+
+// refresh benchmarks
+Deno.bench({
+  name: "refresh - empty pool",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - fully occupied pool",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    for (let i = 0; i < 32; i++) {
+      pool.acquire();
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - partially occupied pool",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    for (let i = 0; i < 16; i++) {
+      pool.acquire();
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - with valid nextAvailableIndex",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    // Acquire first bit to make index 0 unavailable
+    pool.acquire();
+    // Now index 0 is used, so we can safely use index 1
+    pool.refresh(0);
+  },
+});
+
+Deno.bench({
+  name: "refresh - after sparse releases",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    // Acquire all bits
+    for (let i = 0; i < 32; i++) {
+      pool.acquire();
+    }
+    // Release every third bit
+    for (let i = 0; i < 32; i += 3) {
+      pool.release(i);
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - after sequential releases",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(32);
+    // Acquire first half
+    for (let i = 0; i < 16; i++) {
+      pool.acquire();
+    }
+    // Release first quarter
+    for (let i = 0; i < 8; i++) {
+      pool.release(i);
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - across word boundaries",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(64); // 2 words
+    // Fill first word
+    for (let i = 0; i < 32; i++) {
+      pool.acquire();
+    }
+    // Release last bit of first word
+    pool.release(31);
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - with suggested index in occupied region",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(64);
+    // Fill first half
+    for (let i = 0; i < 32; i++) {
+      pool.acquire();
+    }
+    // Try to refresh with index in first word (which has available bits)
+    pool.refresh(0);
+  },
+});
+
+Deno.bench({
+  name: "refresh - after complex pattern",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(64);
+    // Create checkerboard pattern
+    for (let i = 0; i < 64; i += 2) {
+      pool.acquire();
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - minimum size pool",
+  group: "refresh",
+  fn: () => {
+    const pool = new BitPool(1);
+    pool.acquire();
+    pool.release(0);
+    pool.refresh();
+  },
+});
