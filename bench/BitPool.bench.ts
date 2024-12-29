@@ -1,3 +1,6 @@
+/// <reference lib="deno.ns" />
+/// <reference lib="dom" />
+
 import { BitPool } from "../src/BitPool.ts";
 
 // Constants for different pool sizes

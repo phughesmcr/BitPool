@@ -1,4 +1,7 @@
-import { assertEquals, assertThrows } from "https://deno.land/std@0.220.1/assert/mod.ts";
+/// <reference lib="deno.ns" />
+/// <reference lib="dom" />
+
+import { assertEquals, assertThrows } from "jsr:@std/assert@^1.0.9";
 import { BitPool } from "../src/BitPool.ts";
 
 // Constructor Tests
