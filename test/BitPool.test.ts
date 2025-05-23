@@ -15,7 +15,7 @@ Deno.test("BitPool - constructor should throw RangeError for size < 1", () => {
   assertThrows(
     () => new BitPool(0),
     RangeError,
-    '"value" must be greater than 0',
+    '"size" must be greater than 0',
   );
 });
 
@@ -487,13 +487,13 @@ Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
   assertThrows(
     () => BitPool.fromArray(arr, 0),
     RangeError,
-    '"value" must be greater than 0',
+    '"capacity" must be greater than 0',
   );
 
   assertThrows(
     () => BitPool.fromArray(arr, -1),
     RangeError,
-    '"value" must be greater than 0',
+    '"capacity" must be greater than 0',
   );
 
   assertThrows(
