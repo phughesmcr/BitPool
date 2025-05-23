@@ -340,20 +340,23 @@ export class BitPool extends BooleanArray {
    * Rebuilds the hierarchy based on the current state of the data words
    */
   #rebuildHierarchy(): void {
-    for (let h = 0; h < this.#hierarchyLength; h++) {
+    const hierarchyStart = this.#hierarchyStartIndex;
+    const hierarchyLength = this.#hierarchyLength;
+
+    for (let h = 0; h < hierarchyLength; h++) {
       let hierarchyWord = 0;
+      const baseDataWordIdx = h << 5; // Optimized: h * 32
 
       for (let b = 0; b < BooleanArray.BITS_PER_INT; b++) {
-        const dataWordIdx = h * BooleanArray.BITS_PER_INT + b;
-        if (dataWordIdx >= this.#hierarchyStartIndex) break;
+        const dataWordIdx = baseDataWordIdx + b;
+        if (dataWordIdx >= hierarchyStart) break;
 
         const dataValue = this[dataWordIdx];
         if (dataValue !== undefined && dataValue !== 0) {
           hierarchyWord |= 1 << b;
         }
       }
-
-      this.#setHierarchyWord(h, hierarchyWord);
+      this[hierarchyStart + h] = hierarchyWord;
     }
   }
 
