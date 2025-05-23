@@ -120,15 +120,8 @@ export class BitPool extends BooleanArray {
     this.#hierarchyLength = hierarchyWords;
     this.#nextAvailableHierarchyIndex = 0;
 
-    // Initialize all data bits as available
-    for (let i = 0; i < dataWords; i++) {
-      this[i] = 0xFFFFFFFF;
-    }
-
-    // Initialize all hierarchy bits as available
-    for (let i = 0; i < hierarchyWords; i++) {
-      this[this.#hierarchyStartIndex + i] = 0xFFFFFFFF;
-    }
+    // Initialize all data and hierarchy bits as available
+    this.fill(0xFFFFFFFF);
 
     // Handle partial words at the end
     this.#maskUnusedBits();
