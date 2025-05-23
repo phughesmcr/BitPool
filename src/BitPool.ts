@@ -27,7 +27,7 @@ export class BitPool extends BooleanArray {
    */
   static override fromArray(arr: number[], capacity: number): BitPool {
     if (capacity <= 0) {
-      throw new RangeError('"value" must be greater than 0');
+      throw new RangeError('"capacity" must be greater than 0');
     }
     if (capacity < arr.length * BooleanArray.BITS_PER_INT) {
       throw new RangeError(
@@ -79,7 +79,7 @@ export class BitPool extends BooleanArray {
    */
   constructor(size: number) {
     if (size <= 0) {
-      throw new RangeError('"value" must be greater than 0');
+      throw new RangeError('"size" must be greater than 0');
     }
     super(size);
     this.setAll();
@@ -166,7 +166,7 @@ export class BitPool extends BooleanArray {
           `"nextAvailableIndex" must be within the bounds of the Bitpool (Between 0 and ${this.length - 1})`,
         );
       }
-      // If the bit at the specified index is available, we need to update the nextAvailableIndex
+      // If the chunk at the specified index has available bits, update the nextAvailableIndex
       if (this[nextAvailableIndex] !== 0) {
         this.#nextAvailableIndex = nextAvailableIndex;
         return this;
@@ -195,8 +195,11 @@ export class BitPool extends BooleanArray {
       return this;
     }
 
-    // Set the bit back to 1
-    this[index]! |= 1 << position;
+    // Set the bit back to 1 - index is guaranteed to be valid here
+    const currentValue = this[index];
+    if (currentValue !== undefined) {
+      this[index] = currentValue | (1 << position);
+    }
 
     // Update nextAvailableIndex if we're releasing a bit in an earlier chunk
     if (index < this.#nextAvailableIndex) {
