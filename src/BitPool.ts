@@ -164,7 +164,7 @@ export class BitPool extends BooleanArray {
    * @param value The value to scan
    * @returns The position of the first set bit, or -1 if no bits are set
    */
-  findFirstSetBit(value: number): number {
+  static findFirstSetBit(value: number): number {
     if (value === 0) return -1;
     return 31 - Math.clz32(value & -value);
   }
@@ -226,7 +226,7 @@ export class BitPool extends BooleanArray {
       const firstWord = this[0];
       if (firstWord !== undefined && firstWord !== 0) {
         // Use optimized bit scanning for first word
-        const bitPos = firstWord & 1 ? 0 : this.findFirstSetBit(firstWord);
+        const bitPos = firstWord & 1 ? 0 : BitPool.findFirstSetBit(firstWord);
         if (bitPos !== -1 && bitPos < this.#actualSize) {
           const newValue = firstWord & ~(1 << bitPos);
           this[0] = newValue;
@@ -264,7 +264,7 @@ export class BitPool extends BooleanArray {
       }
 
       // Find first available chunk using bit scanning
-      const hierarchyBitPos = this.findFirstSetBit(hierarchyWord);
+      const hierarchyBitPos = BitPool.findFirstSetBit(hierarchyWord);
       if (hierarchyBitPos === -1) {
         hierarchyIdx++;
         continue;
@@ -283,7 +283,7 @@ export class BitPool extends BooleanArray {
       }
 
       // Find first available bit in the data word
-      const dataBitPos = this.findFirstSetBit(dataWord);
+      const dataBitPos = BitPool.findFirstSetBit(dataWord);
       if (dataBitPos === -1) {
         // Data word is actually full, update hierarchy and continue
         this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));

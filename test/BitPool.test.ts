@@ -502,3 +502,252 @@ Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
     '"value" must be smaller than or equal to 536870911',
   );
 });
+
+// refresh() Method Tests
+Deno.test("BitPool - refresh should work without parameters", () => {
+  const pool = new BitPool(32);
+  const bit1 = pool.acquire();
+  pool.acquire(); // Just acquire without storing
+  pool.release(bit1);
+
+  const result = pool.refresh();
+  assertEquals(result, pool); // Should return this
+  assertEquals(pool.nextAvailableIndex, 0); // Should find the released bit
+});
+
+Deno.test("BitPool - refresh should accept valid nextAvailableIndex", () => {
+  const pool = new BitPool(64);
+  // Acquire some bits but leave some available in the first chunk
+  for (let i = 0; i < 16; i++) { // Only half of first chunk
+    pool.acquire();
+  }
+  // Acquire some from second chunk to make nextAvailableIndex point there
+  for (let i = 0; i < 16; i++) {
+    pool.acquire();
+  }
+
+  // Now refresh with index 0 (which should have available bits)
+  const result = pool.refresh(0);
+  assertEquals(result, pool);
+  assertEquals(pool.nextAvailableIndex, 0); // Should point to first hierarchy index
+});
+
+Deno.test("BitPool - refresh should throw TypeError for NaN nextAvailableIndex", () => {
+  const pool = new BitPool(32);
+  assertThrows(
+    () => pool.refresh(NaN),
+    TypeError,
+    '"nextAvailableIndex" must be a number',
+  );
+});
+
+Deno.test("BitPool - refresh should throw RangeError for out-of-bounds nextAvailableIndex", () => {
+  const pool = new BitPool(32);
+  assertThrows(
+    () => pool.refresh(-1),
+    RangeError,
+    '"nextAvailableIndex" must be within the bounds of the Bitpool',
+  );
+
+  assertThrows(
+    () => pool.refresh(33),
+    RangeError,
+    '"nextAvailableIndex" must be within the bounds of the Bitpool',
+  );
+});
+
+Deno.test("BitPool - refresh should rebuild hierarchy correctly", () => {
+  const pool = new BitPool(64);
+  // Create a pattern where hierarchy needs rebuilding
+  for (let i = 0; i < 40; i++) {
+    pool.acquire();
+  }
+  // Release some bits to create fragmentation
+  pool.release(10);
+  pool.release(35);
+
+  pool.refresh();
+
+  // Verify the released bits can be acquired again
+  assertEquals(pool.acquire(), 10);
+  assertEquals(pool.acquire(), 35);
+});
+
+// getHierarchyWord() Method Tests
+Deno.test("BitPool - getHierarchyWord should return correct values", () => {
+  const pool = new BitPool(32);
+
+  // Initially all hierarchy bits should be set (available)
+  const word = pool.getHierarchyWord(0);
+  assertEquals(word, 1); // Should have 1 bit set for the single data word
+});
+
+Deno.test("BitPool - getHierarchyWord should return 0 for out-of-bounds index", () => {
+  const pool = new BitPool(32);
+  assertEquals(pool.getHierarchyWord(10), 0);
+});
+
+Deno.test("BitPool - getHierarchyWord should reflect data word status", () => {
+  const pool = new BitPool(64); // 2 data words, 1 hierarchy word
+
+  // Fill first word completely
+  for (let i = 0; i < 32; i++) {
+    pool.acquire();
+  }
+
+  const hierarchyWord = pool.getHierarchyWord(0);
+  // First bit should be 0 (word is full), second bit should be 1 (word has space)
+  assertEquals(hierarchyWord & 1, 0); // First data word is full
+  assertEquals((hierarchyWord & 2) >> 1, 1); // Second data word has space
+});
+
+// findFirstSetBit() Method Tests
+Deno.test("BitPool - findFirstSetBit should return -1 for 0", () => {
+  assertEquals(BitPool.findFirstSetBit(0), -1);
+});
+
+Deno.test("BitPool - findFirstSetBit should find correct bit positions", () => {
+  assertEquals(BitPool.findFirstSetBit(1), 0); // 0b1
+  assertEquals(BitPool.findFirstSetBit(2), 1); // 0b10
+  assertEquals(BitPool.findFirstSetBit(4), 2); // 0b100
+  assertEquals(BitPool.findFirstSetBit(8), 3); // 0b1000
+  assertEquals(BitPool.findFirstSetBit(0x80000000), 31); // Highest bit
+});
+
+Deno.test("BitPool - findFirstSetBit should find rightmost bit when multiple are set", () => {
+  assertEquals(BitPool.findFirstSetBit(0b1010), 1); // Should find bit 1, not bit 3
+  assertEquals(BitPool.findFirstSetBit(0b11000), 3); // Should find bit 3, not bit 4
+});
+
+// isOccupied() Error Handling Tests
+Deno.test("BitPool - isOccupied should throw TypeError for non-number input", () => {
+  const pool = new BitPool(32);
+
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => pool.isOccupied("0"),
+    TypeError,
+    '"bit" must be a number',
+  );
+
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => pool.isOccupied(null),
+    TypeError,
+    '"bit" must be a number',
+  );
+
+  assertThrows(
+    () => pool.isOccupied(NaN),
+    TypeError,
+    '"bit" must be a number',
+  );
+});
+
+// MAX_SAFE_BITPOOL_SIZE Tests
+Deno.test("BitPool - MAX_SAFE_BITPOOL_SIZE should return a valid number", () => {
+  const maxSize = BitPool.MAX_SAFE_BITPOOL_SIZE;
+  assertEquals(typeof maxSize, "number");
+  assertEquals(maxSize > 0, true);
+  assertEquals(Number.isSafeInteger(maxSize), true);
+});
+
+Deno.test("BitPool - should be able to create pool at MAX_SAFE_BITPOOL_SIZE", () => {
+  const maxSize = BitPool.MAX_SAFE_BITPOOL_SIZE;
+  const pool = new BitPool(maxSize);
+  assertEquals(pool.size, maxSize);
+});
+
+// Large Hierarchy Tests
+Deno.test("BitPool - should handle pools requiring multiple hierarchy words", () => {
+  // Create a pool large enough to require multiple hierarchy words
+  // 32 * 32 = 1024 data words = 32 hierarchy words
+  const size = 32 * 32 * 32; // 32,768 bits
+  const pool = new BitPool(size);
+
+  assertEquals(pool.size, size);
+  assertEquals(pool.nextAvailableIndex, 0);
+
+  // Test basic operations work
+  const bit = pool.acquire();
+  assertEquals(bit, 0);
+  assertEquals(pool.isOccupied(bit), true);
+
+  pool.release(bit);
+  assertEquals(pool.isOccupied(bit), false);
+});
+
+Deno.test("BitPool - should handle hierarchy spanning across multiple levels", () => {
+  const pool = new BitPool(2048); // Requires multiple hierarchy words
+  const acquired: number[] = [];
+
+  // Fill scattered patterns across multiple chunks
+  for (let i = 0; i < 64; i++) {
+    acquired.push(pool.acquire());
+  }
+
+  // Release every 4th bit to create fragmentation
+  for (let i = 0; i < acquired.length; i += 4) {
+    pool.release(acquired[i]!);
+  }
+
+  // Should be able to find and reuse released bits
+  for (let i = 0; i < acquired.length; i += 4) {
+    const newBit = pool.acquire();
+    assertEquals(newBit, acquired[i]);
+  }
+});
+
+// Edge Cases for Partial Words
+Deno.test("BitPool - should handle pool size not divisible by 32", () => {
+  const pool = new BitPool(50); // 1 full word + 18 bits
+
+  // Fill the entire pool
+  const acquired: number[] = [];
+  for (let i = 0; i < 50; i++) {
+    const bit = pool.acquire();
+    assertEquals(bit, i);
+    acquired.push(bit);
+  }
+
+  // Should be full
+  assertEquals(pool.acquire(), -1);
+
+  // Release last bit and verify it can be reacquired
+  pool.release(49);
+  assertEquals(pool.acquire(), 49);
+});
+
+// Complex State Validation
+Deno.test("BitPool - should maintain consistent hierarchy after complex operations", () => {
+  const pool = new BitPool(128); // Multiple words and hierarchy
+  const acquired: number[] = [];
+
+  // Create complex acquisition pattern
+  for (let i = 0; i < 80; i++) {
+    acquired.push(pool.acquire());
+  }
+
+  // Create fragmentation pattern - release every 3rd bit
+  const releasedBits: number[] = [];
+  for (let i = 0; i < acquired.length; i += 3) {
+    pool.release(acquired[i]!);
+    releasedBits.push(acquired[i]!);
+  }
+
+  // Force hierarchy rebuild
+  pool.refresh();
+
+  // Verify all released bits can be found and reacquired
+  const reacquired: number[] = [];
+  for (let i = 0; i < releasedBits.length; i++) {
+    const bit = pool.acquire();
+    assertEquals(bit !== -1, true);
+    reacquired.push(bit);
+  }
+
+  // Verify the reacquired bits match the released ones
+  releasedBits.sort((a, b) => a - b);
+  reacquired.sort((a, b) => a - b);
+  assertEquals(reacquired, releasedBits);
+});
