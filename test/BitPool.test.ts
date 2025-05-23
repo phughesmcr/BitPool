@@ -478,8 +478,8 @@ Deno.test("BitPool.fromArray - should throw for invalid array values", () => {
 
 Deno.test("BitPool.fromArray - should handle maximum valid capacity", () => {
   const arr = [0b11110000];
-  const pool = BitPool.fromArray(arr, 536870911); // Max valid capacity
-  assertEquals(pool.size, 536870911);
+  const pool = BitPool.fromArray(arr, BitPool.MAX_SAFE_BITPOOL_SIZE); // Max valid capacity
+  assertEquals(pool.size, BitPool.MAX_SAFE_BITPOOL_SIZE);
 });
 
 Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
