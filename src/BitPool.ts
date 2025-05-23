@@ -69,7 +69,7 @@ export class BitPool extends BooleanArray {
       if (!Number.isSafeInteger(value)) {
         throw new TypeError('"value" must be a safe integer');
       }
-      if (value! < 0) {
+      if (value === undefined || value < 0) {
         throw new RangeError('"value" must be greater than or equal to 0');
       }
 
@@ -82,7 +82,7 @@ export class BitPool extends BooleanArray {
         if (absolutePosition >= capacity) break;
 
         // If the bit is 0 in the input, mark it as occupied (false in our pool)
-        if ((value! & (1 << bitPos)) === 0) {
+        if ((value & (1 << bitPos)) === 0) {
           pool.setBool(absolutePosition, false);
         }
       }
