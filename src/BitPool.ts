@@ -173,7 +173,8 @@ export class BitPool extends BooleanArray {
       }
     }
     // Fallback to finding the next available index using the default findIndex function
-    this.#nextAvailableIndex = this.findIndex(isGreaterThanZero);
+    const foundIndex = this.findIndex(isGreaterThanZero);
+    this.#nextAvailableIndex = foundIndex === -1 ? this.length : foundIndex;
     return this;
   }
 
