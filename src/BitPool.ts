@@ -74,7 +74,7 @@ export class BitPool extends BooleanArray {
       }
 
       // Each value represents a 32-bit chunk
-      const baseIndex = i * BooleanArray.BITS_PER_INT;
+      const baseIndex = i << 5;
 
       // For each bit in the current value
       for (let bitPos = 0; bitPos < BooleanArray.BITS_PER_INT; bitPos++) {
@@ -240,7 +240,7 @@ export class BitPool extends BooleanArray {
         continue;
       }
 
-      const dataWordIdx = hierarchyIdx * BooleanArray.BITS_PER_INT + hierarchyBitPos;
+      const dataWordIdx = (hierarchyIdx << 5) + hierarchyBitPos;
 
       // Check if we're beyond the data section
       if (dataWordIdx >= this.#hierarchyStartIndex) break;
@@ -260,7 +260,7 @@ export class BitPool extends BooleanArray {
         continue;
       }
 
-      const absolutePosition = dataWordIdx * BooleanArray.BITS_PER_INT + dataBitPos;
+      const absolutePosition = (dataWordIdx << 5) + dataBitPos;
 
       // Check if position is within actual size
       if (absolutePosition >= this.#actualSize) {
