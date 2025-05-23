@@ -221,7 +221,37 @@ export class BitPool extends BooleanArray {
    * @returns The acquired bit's position or -1 if no bits are available
    */
   acquire(): number {
-    // Start from the known available hierarchy index
+    // Fast path: when nextAvailableHierarchyIndex is 0, try first word directly if it has bits
+    if (this.#nextAvailableHierarchyIndex === 0) {
+      const firstWord = this[0];
+      if (firstWord !== undefined && firstWord !== 0) {
+        // Use optimized bit scanning for first word
+        const bitPos = firstWord & 1 ? 0 : this.findFirstSetBit(firstWord);
+        if (bitPos !== -1 && bitPos < this.#actualSize) {
+          const newValue = firstWord & ~(1 << bitPos);
+          this[0] = newValue;
+
+          // Update hierarchy only if word becomes empty
+          if (newValue === 0) {
+            // Inline hierarchy operations for index 0
+            const hierarchyWordIndex = this.#hierarchyStartIndex;
+            const currentHierarchyWord = this[hierarchyWordIndex];
+            if (currentHierarchyWord !== undefined) {
+              const newHierarchyWord = currentHierarchyWord & ~1;
+              this[hierarchyWordIndex] = newHierarchyWord;
+
+              if (newHierarchyWord === 0) {
+                this.#nextAvailableHierarchyIndex = this.#findNextAvailableHierarchyIndex(1);
+              }
+            }
+          }
+
+          return bitPos;
+        }
+      }
+    }
+
+    // Standard path: Start from the known available hierarchy index
     let hierarchyIdx = this.#nextAvailableHierarchyIndex;
 
     while (hierarchyIdx < this.#hierarchyLength) {
@@ -270,10 +300,11 @@ export class BitPool extends BooleanArray {
       }
 
       // Acquire the bit
-      this[dataWordIdx] = dataWord & ~(1 << dataBitPos);
+      const newDataWord = dataWord & ~(1 << dataBitPos);
+      this[dataWordIdx] = newDataWord;
 
       // Update hierarchy if data word becomes empty
-      if (this[dataWordIdx] === 0) {
+      if (newDataWord === 0) {
         this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
 
         // Update next available hierarchy index if this hierarchy word becomes empty
