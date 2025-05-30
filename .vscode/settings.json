@@ -46,6 +46,7 @@
     "treeshake",
     "tsbuildinfo",
     "tslib",
-    "typechecking"
+    "typechecking",
+    "xnor"
   ]
 }

@@ -970,3 +970,1001 @@ Deno.bench({
     }
   },
 });
+
+// =============================================================================
+// OVERRIDDEN BOOLEANARRAY METHODS BENCHMARKS
+// =============================================================================
+
+// getBool() benchmarks
+Deno.bench({
+  name: "getBool() - first bit",
+  group: "getBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBool(0);
+  },
+});
+
+Deno.bench({
+  name: "getBool() - last bit",
+  group: "getBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBool(MEDIUM_POOL_SIZE - 1);
+  },
+});
+
+Deno.bench({
+  name: "getBool() - middle bit",
+  group: "getBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBool(MEDIUM_POOL_SIZE / 2);
+  },
+});
+
+Deno.bench({
+  name: "getBool() - random access pattern",
+  group: "getBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const positions = [0, 31, 32, 63, 64, 127, 256, 512, 1000];
+    for (const pos of positions) {
+      if (pos < MEDIUM_POOL_SIZE) pool.getBool(pos);
+    }
+  },
+});
+
+Deno.bench({
+  name: "getBool() - after modifications",
+  group: "getBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Modify pool state
+    pool.acquire();
+    pool.acquire();
+    pool.setBool(100, false);
+    // Test getBool performance
+    pool.getBool(50);
+    pool.getBool(100);
+    pool.getBool(200);
+  },
+});
+
+// getBools() benchmarks
+Deno.bench({
+  name: "getBools() - small range (10 bits)",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBools(0, 10);
+  },
+});
+
+Deno.bench({
+  name: "getBools() - medium range (100 bits)",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBools(100, 100);
+  },
+});
+
+Deno.bench({
+  name: "getBools() - large range (500 bits)",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBools(0, 500);
+  },
+});
+
+Deno.bench({
+  name: "getBools() - across word boundaries",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getBools(30, 10); // Spans 32-bit boundary
+  },
+});
+
+Deno.bench({
+  name: "getBools() - entire pool",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(256); // Smaller for full read
+    pool.getBools(0, 256);
+  },
+});
+
+Deno.bench({
+  name: "getBools() - with mixed state",
+  group: "getBools",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Create mixed state
+    for (let i = 0; i < 100; i += 2) {
+      pool.setBool(i, false);
+    }
+    pool.getBools(0, 200);
+  },
+});
+
+// setBool() benchmarks
+Deno.bench({
+  name: "setBool() - set to false (occupy)",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setBool(100, false);
+  },
+});
+
+Deno.bench({
+  name: "setBool() - set to true (release)",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setBool(100, false); // First occupy
+    pool.setBool(100, true); // Then release
+  },
+});
+
+Deno.bench({
+  name: "setBool() - word boundary transitions",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setBool(31, false); // Last bit of first word
+    pool.setBool(32, false); // First bit of second word
+  },
+});
+
+Deno.bench({
+  name: "setBool() - hierarchy updates",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Fill a word completely to trigger hierarchy updates
+    for (let i = 0; i < 32; i++) {
+      pool.setBool(i, false);
+    }
+    // Now set one back to trigger hierarchy update
+    pool.setBool(15, true);
+  },
+});
+
+Deno.bench({
+  name: "setBool() - sequential pattern",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(256);
+    for (let i = 0; i < 100; i++) {
+      pool.setBool(i, false);
+    }
+  },
+});
+
+Deno.bench({
+  name: "setBool() - random pattern",
+  group: "setBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const positions = [5, 67, 123, 456, 789, 999];
+    for (const pos of positions) {
+      pool.setBool(pos, false);
+    }
+  },
+});
+
+// setRange() benchmarks
+Deno.bench({
+  name: "setRange() - small range (10 bits) to false",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, 10, false);
+  },
+});
+
+Deno.bench({
+  name: "setRange() - medium range (100 bits) to false",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(100, 100, false);
+  },
+});
+
+Deno.bench({
+  name: "setRange() - large range (500 bits) to false",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, 500, false);
+  },
+});
+
+Deno.bench({
+  name: "setRange() - small range (10 bits) to true",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, 10, false); // First set to false
+    pool.setRange(0, 10, true); // Then back to true
+  },
+});
+
+Deno.bench({
+  name: "setRange() - across word boundaries",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(30, 10, false); // Spans 32-bit boundary
+  },
+});
+
+Deno.bench({
+  name: "setRange() - multiple word spans",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, 100, false); // Spans multiple 32-bit words
+  },
+});
+
+Deno.bench({
+  name: "setRange() - alternating pattern",
+  group: "setRange",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    for (let i = 0; i < 200; i += 20) {
+      pool.setRange(i, 10, false);
+    }
+  },
+});
+
+// toggleBool() benchmarks
+Deno.bench({
+  name: "toggleBool() - single bit",
+  group: "toggleBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.toggleBool(100);
+  },
+});
+
+Deno.bench({
+  name: "toggleBool() - word boundaries",
+  group: "toggleBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.toggleBool(31); // Last bit of first word
+    pool.toggleBool(32); // First bit of second word
+  },
+});
+
+Deno.bench({
+  name: "toggleBool() - hierarchy transitions",
+  group: "toggleBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Fill a word except one bit
+    for (let i = 0; i < 31; i++) {
+      pool.toggleBool(i);
+    }
+    // Toggle the last bit to make word empty
+    pool.toggleBool(31);
+  },
+});
+
+Deno.bench({
+  name: "toggleBool() - sequential pattern",
+  group: "toggleBool",
+  fn: () => {
+    const pool = new BitPool(256);
+    for (let i = 0; i < 100; i++) {
+      pool.toggleBool(i);
+    }
+  },
+});
+
+Deno.bench({
+  name: "toggleBool() - back and forth",
+  group: "toggleBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const pos = 100;
+    for (let i = 0; i < 50; i++) {
+      pool.toggleBool(pos);
+    }
+  },
+});
+
+// forEachBool() benchmarks
+Deno.bench({
+  name: "forEachBool() - small range (100 bits)",
+  group: "forEachBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    let count = 0;
+    pool.forEachBool(() => count++, 0, 100);
+  },
+});
+
+Deno.bench({
+  name: "forEachBool() - medium range (500 bits)",
+  group: "forEachBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    let count = 0;
+    pool.forEachBool(() => count++, 0, 500);
+  },
+});
+
+Deno.bench({
+  name: "forEachBool() - entire pool",
+  group: "forEachBool",
+  fn: () => {
+    const pool = new BitPool(512); // Smaller for full iteration
+    let count = 0;
+    pool.forEachBool(() => count++);
+  },
+});
+
+Deno.bench({
+  name: "forEachBool() - with complex callback",
+  group: "forEachBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const results: number[] = [];
+    pool.forEachBool(
+      (index, value) => {
+        if (value) results.push(index);
+      },
+      0,
+      200,
+    );
+  },
+});
+
+Deno.bench({
+  name: "forEachBool() - mixed state pool",
+  group: "forEachBool",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Create mixed state
+    for (let i = 0; i < 100; i += 2) {
+      pool.setBool(i, false);
+    }
+    let trueCount = 0;
+    pool.forEachBool(
+      (_, value) => {
+        if (value) trueCount++;
+      },
+      0,
+      200,
+    );
+  },
+});
+
+// getFirstSetIndex() benchmarks
+Deno.bench({
+  name: "getFirstSetIndex() - first bit set",
+  group: "getFirstSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getFirstSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getFirstSetIndex() - empty pool",
+  group: "getFirstSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Clear all bits
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.getFirstSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getFirstSetIndex() - sparse pattern",
+  group: "getFirstSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Clear most bits, leave a few scattered
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.setBool(500, true);
+    pool.getFirstSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getFirstSetIndex() - with start index",
+  group: "getFirstSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getFirstSetIndex(500);
+  },
+});
+
+Deno.bench({
+  name: "getFirstSetIndex() - across word boundaries",
+  group: "getFirstSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Clear first word, leave second word
+    pool.setRange(0, 32, false);
+    pool.getFirstSetIndex();
+  },
+});
+
+// getLastSetIndex() benchmarks
+Deno.bench({
+  name: "getLastSetIndex() - last bit set",
+  group: "getLastSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getLastSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getLastSetIndex() - empty pool",
+  group: "getLastSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.getLastSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getLastSetIndex() - sparse pattern",
+  group: "getLastSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.setBool(100, true);
+    pool.getLastSetIndex();
+  },
+});
+
+Deno.bench({
+  name: "getLastSetIndex() - with end index",
+  group: "getLastSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getLastSetIndex(500);
+  },
+});
+
+Deno.bench({
+  name: "getLastSetIndex() - across word boundaries",
+  group: "getLastSetIndex",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(32, MEDIUM_POOL_SIZE - 32, false); // Clear from second word onward
+    pool.getLastSetIndex();
+  },
+});
+
+// getPopulationCount() benchmarks
+Deno.bench({
+  name: "getPopulationCount() - full pool",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.getPopulationCount();
+  },
+});
+
+Deno.bench({
+  name: "getPopulationCount() - empty pool",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.getPopulationCount();
+  },
+});
+
+Deno.bench({
+  name: "getPopulationCount() - half full",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE / 2, false);
+    pool.getPopulationCount();
+  },
+});
+
+Deno.bench({
+  name: "getPopulationCount() - alternating pattern",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    for (let i = 0; i < MEDIUM_POOL_SIZE; i += 2) {
+      pool.setBool(i, false);
+    }
+    pool.getPopulationCount();
+  },
+});
+
+Deno.bench({
+  name: "getPopulationCount() - partial word boundary",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(50); // Not divisible by 32
+    pool.getPopulationCount();
+  },
+});
+
+Deno.bench({
+  name: "getPopulationCount() - large pool",
+  group: "getPopulationCount",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.getPopulationCount();
+  },
+});
+
+// isEmpty() benchmarks
+Deno.bench({
+  name: "isEmpty() - full pool",
+  group: "isEmpty",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "isEmpty() - empty pool",
+  group: "isEmpty",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "isEmpty() - single bit set",
+  group: "isEmpty",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.setRange(0, MEDIUM_POOL_SIZE, false);
+    pool.setBool(MEDIUM_POOL_SIZE - 1, true);
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "isEmpty() - large pool",
+  group: "isEmpty",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "isEmpty() - after modifications",
+  group: "isEmpty",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Make some modifications
+    pool.acquire();
+    pool.acquire();
+    pool.setBool(100, false);
+    pool.isEmpty();
+  },
+});
+
+// clone() benchmarks
+Deno.bench({
+  name: "clone() - small pool",
+  group: "clone",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.clone();
+  },
+});
+
+Deno.bench({
+  name: "clone() - medium pool",
+  group: "clone",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.clone();
+  },
+});
+
+Deno.bench({
+  name: "clone() - large pool",
+  group: "clone",
+  fn: () => {
+    const pool = new BitPool(5000); // Reasonable size for cloning
+    pool.clone();
+  },
+});
+
+Deno.bench({
+  name: "clone() - modified pool",
+  group: "clone",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Make modifications before cloning
+    for (let i = 0; i < 100; i++) {
+      pool.acquire();
+    }
+    pool.clone();
+  },
+});
+
+Deno.bench({
+  name: "clone() - fragmented pool",
+  group: "clone",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Create fragmentation
+    for (let i = 0; i < 200; i += 2) {
+      pool.setBool(i, false);
+    }
+    pool.clone();
+  },
+});
+
+// clear() benchmarks
+Deno.bench({
+  name: "clear() - small pool",
+  group: "clear",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.clear();
+  },
+});
+
+Deno.bench({
+  name: "clear() - medium pool",
+  group: "clear",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.clear();
+  },
+});
+
+Deno.bench({
+  name: "clear() - large pool",
+  group: "clear",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.clear();
+  },
+});
+
+Deno.bench({
+  name: "clear() - after modifications",
+  group: "clear",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Make modifications first
+    for (let i = 0; i < 100; i++) {
+      pool.acquire();
+    }
+    pool.clear();
+  },
+});
+
+Deno.bench({
+  name: "clear() - fragmented pool",
+  group: "clear",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Create fragmentation
+    for (let i = 0; i < 200; i += 3) {
+      pool.setBool(i, false);
+    }
+    pool.clear();
+  },
+});
+
+// setAll() benchmarks
+Deno.bench({
+  name: "setAll() - small pool",
+  group: "setAll",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.clear(); // Clear first
+    pool.setAll();
+  },
+});
+
+Deno.bench({
+  name: "setAll() - medium pool",
+  group: "setAll",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.clear(); // Clear first
+    pool.setAll();
+  },
+});
+
+Deno.bench({
+  name: "setAll() - large pool",
+  group: "setAll",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.clear(); // Clear first
+    pool.setAll();
+  },
+});
+
+Deno.bench({
+  name: "setAll() - partial word boundary",
+  group: "setAll",
+  fn: () => {
+    const pool = new BitPool(50); // Not divisible by 32
+    pool.clear();
+    pool.setAll();
+  },
+});
+
+Deno.bench({
+  name: "setAll() - after fragmentation",
+  group: "setAll",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    // Create fragmentation first
+    for (let i = 0; i < 200; i += 2) {
+      pool.setBool(i, false);
+    }
+    pool.setAll();
+  },
+});
+
+// truthyIndices() benchmarks
+Deno.bench({
+  name: "truthyIndices() - full pool iteration",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(256); // Reasonable size for full iteration
+    const indices = Array.from(pool.truthyIndices());
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+Deno.bench({
+  name: "truthyIndices() - empty pool iteration",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(256);
+    pool.clear();
+    const indices = Array.from(pool.truthyIndices());
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+Deno.bench({
+  name: "truthyIndices() - sparse pattern",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(256);
+    pool.clear();
+    // Set every 10th bit
+    for (let i = 0; i < 256; i += 10) {
+      pool.setBool(i, true);
+    }
+    const indices = Array.from(pool.truthyIndices());
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+Deno.bench({
+  name: "truthyIndices() - with range",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const indices = Array.from(pool.truthyIndices(100, 300));
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+Deno.bench({
+  name: "truthyIndices() - alternating pattern",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(256);
+    // Create alternating pattern
+    for (let i = 0; i < 256; i += 2) {
+      pool.setBool(i, false);
+    }
+    const indices = Array.from(pool.truthyIndices());
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+Deno.bench({
+  name: "truthyIndices() - word boundary spans",
+  group: "truthyIndices",
+  fn: () => {
+    const pool = new BitPool(128);
+    // Set bits across word boundaries
+    pool.setBool(31, true);
+    pool.setBool(32, true);
+    pool.setBool(63, true);
+    pool.setBool(64, true);
+    const indices = Array.from(pool.truthyIndices(30, 70));
+    void indices; // Intentionally unused in benchmark
+  },
+});
+
+// Combined override operations benchmarks
+Deno.bench({
+  name: "Combined overrides - mixed read operations",
+  group: "combined-overrides",
+  fn: () => {
+    const pool = new BitPool(512);
+    // Mix of read operations
+    pool.getBool(100);
+    pool.getBools(200, 50);
+    pool.getFirstSetIndex();
+    pool.getLastSetIndex();
+    pool.getPopulationCount();
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "Combined overrides - mixed write operations",
+  group: "combined-overrides",
+  fn: () => {
+    const pool = new BitPool(512);
+    // Mix of write operations
+    pool.setBool(100, false);
+    pool.setRange(200, 20, false);
+    pool.toggleBool(300);
+    pool.setBool(100, true);
+  },
+});
+
+Deno.bench({
+  name: "Combined overrides - complex workflow",
+  group: "combined-overrides",
+  fn: () => {
+    const pool = new BitPool(256);
+    // Simulate complex usage pattern
+
+    // Initial setup
+    pool.setRange(0, 50, false);
+
+    // Analysis
+    const count1 = pool.getPopulationCount();
+    const firstSet = pool.getFirstSetIndex();
+
+    // Modifications
+    pool.toggleBool(25);
+    pool.setBool(75, false);
+
+    // Bulk read
+    const values = pool.getBools(20, 60);
+
+    // Final analysis
+    const count2 = pool.getPopulationCount();
+    const isEmpty = pool.isEmpty();
+
+    // Use variables to avoid linter warnings
+    void count1;
+    void firstSet;
+    void values;
+    void count2;
+    void isEmpty;
+  },
+});
+
+Deno.bench({
+  name: "Combined overrides - hierarchy stress test",
+  group: "combined-overrides",
+  fn: () => {
+    const pool = new BitPool(1024); // Multiple hierarchy words
+
+    // Create pattern that stresses hierarchy
+    for (let word = 0; word < 32; word++) {
+      // Fill every other word completely
+      if (word % 2 === 0) {
+        pool.setRange(word * 32, 32, false);
+      }
+    }
+
+    // Operations that traverse hierarchy
+    pool.getFirstSetIndex();
+    pool.getPopulationCount();
+
+    // Modify to trigger hierarchy updates
+    pool.setBool(15, true); // In a cleared word
+    pool.setBool(50, false); // In a set word
+
+    // Re-analyze
+    pool.getFirstSetIndex();
+    pool.isEmpty();
+  },
+});
+
+Deno.bench({
+  name: "Combined overrides - iterator performance",
+  group: "combined-overrides",
+  fn: () => {
+    const pool = new BitPool(512);
+
+    // Create interesting pattern
+    for (let i = 0; i < 512; i += 3) {
+      pool.setBool(i, false);
+    }
+
+    // Test different iteration methods
+    const truthyCount = Array.from(pool.truthyIndices()).length;
+
+    let forEachCount = 0;
+    pool.forEachBool((_, value) => {
+      if (value) forEachCount++;
+    });
+
+    const popCount = pool.getPopulationCount();
+
+    // Use variables to avoid linter warnings
+    void truthyCount;
+    void forEachCount;
+    void popCount;
+  },
+});
+
+// Performance comparison benchmarks (overridden vs original functionality)
+Deno.bench({
+  name: "Override comparison - size vs actual size",
+  group: "override-comparison",
+  fn: () => {
+    const pool = new BitPool(512);
+    // Test that overridden methods use actual size, not total array size
+    const actualSize = pool.size; // Should be 512
+
+    // These should all respect the 512 limit, not the larger underlying array
+    pool.getBool(actualSize - 1); // Should work
+    pool.getPopulationCount(); // Should count only 512 bits
+    pool.isEmpty(); // Should check only 512 bits
+
+    try {
+      pool.getBool(actualSize); // Should throw
+    } catch {
+      // Expected
+    }
+  },
+});
+
+Deno.bench({
+  name: "Override comparison - hierarchy maintenance",
+  group: "override-comparison",
+  fn: () => {
+    const pool = new BitPool(128);
+
+    // Operations that should maintain hierarchy
+    pool.setBool(31, false); // Word boundary
+    pool.setRange(32, 32, false); // Entire word
+    pool.toggleBool(64); // Another word
+
+    // Verify hierarchy is maintained by testing acquire performance
+    const startTime = performance.now();
+    const bit = pool.acquire(); // Should be fast due to hierarchy
+    const endTime = performance.now();
+
+    if (bit !== -1) {
+      pool.release(bit);
+    }
+
+    // Use timing variables to avoid linter warnings
+    void startTime;
+    void endTime;
+  },
+});
