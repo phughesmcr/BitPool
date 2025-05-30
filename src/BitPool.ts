@@ -442,16 +442,19 @@ export class BitPool extends BooleanArray {
    * @param endIndex the end index to get the indices from [default = this.size]
    * @returns Iterator of indices where bits are set
    */
-  override *truthyIndices(startIndex = 0, endIndex = this.#actualSize): IterableIterator<number> {
+  override *truthyIndices(startIndex: number = 0, endIndex?: number): IterableIterator<number> {
+    // Use actual size as default for endIndex if not provided
+    const actualEndIndex: number = endIndex ?? this.#actualSize;
+
     // Validate and adjust range
     startIndex = Math.max(0, startIndex);
-    endIndex = Math.min(endIndex, this.#actualSize);
+    const finalEndIndex: number = Math.min(actualEndIndex, this.#actualSize);
 
-    if (startIndex >= endIndex) return;
+    if (startIndex >= finalEndIndex) return;
 
     // Calculate word boundaries
     const startWord = Math.floor(startIndex / BooleanArray.BITS_PER_INT);
-    const endWord = Math.floor((endIndex - 1) / BooleanArray.BITS_PER_INT);
+    const endWord = Math.floor((finalEndIndex - 1) / BooleanArray.BITS_PER_INT);
 
     for (let wordIndex = startWord; wordIndex <= endWord; wordIndex++) {
       const word = this[wordIndex];
@@ -460,7 +463,7 @@ export class BitPool extends BooleanArray {
       // Calculate bit range for this word
       const firstBit = wordIndex === startWord ? startIndex % BooleanArray.BITS_PER_INT : 0;
       const lastBit = wordIndex === endWord
-        ? (endIndex - 1) % BooleanArray.BITS_PER_INT
+        ? (finalEndIndex - 1) % BooleanArray.BITS_PER_INT
         : BooleanArray.BITS_PER_INT - 1;
 
       // Check each bit in the word
@@ -677,16 +680,19 @@ export class BitPool extends BooleanArray {
   override forEachBool(
     callback: (index: number, value: boolean, array: this) => void,
     startIndex: number = 0,
-    count: number = this.#actualSize - startIndex,
+    count?: number,
   ): this {
-    if (count === 0) return this;
+    // Use remaining elements as default for count if not provided
+    const actualCount: number = count ?? (this.#actualSize - startIndex);
+
+    if (actualCount === 0) return this;
     BooleanArray.validateValue(startIndex, this.#actualSize);
-    BooleanArray.validateValue(startIndex + count, this.#actualSize + 1);
+    BooleanArray.validateValue(startIndex + actualCount, this.#actualSize + 1);
 
     let currentChunkIndex = -1;
     let currentChunkValue = 0;
 
-    const endIndex = startIndex + count;
+    const endIndex = startIndex + actualCount;
     for (let i = startIndex; i < endIndex; i++) {
       const chunkForThisBit = i >>> BooleanArray.CHUNK_SHIFT;
       if (chunkForThisBit !== currentChunkIndex) {
@@ -740,12 +746,15 @@ export class BitPool extends BooleanArray {
    * @param startIndex the index to start searching from (exclusive upper bound) [default = this.size]
    * @returns the index of the last set bit, or -1 if no bits are set in the specified range
    */
-  override getLastSetIndex(startIndex: number = this.#actualSize): number {
-    BooleanArray.validateValue(startIndex, this.#actualSize + 1);
+  override getLastSetIndex(startIndex?: number): number {
+    // Use actual size as default for startIndex if not provided
+    const actualStartIndex: number = startIndex ?? this.#actualSize;
 
-    if (startIndex === 0) return -1;
+    BooleanArray.validateValue(actualStartIndex, this.#actualSize + 1);
 
-    const searchUpToBitIndex_inclusive = startIndex - 1;
+    if (actualStartIndex === 0) return -1;
+
+    const searchUpToBitIndex_inclusive = actualStartIndex - 1;
     const startChunk = searchUpToBitIndex_inclusive >>> BooleanArray.CHUNK_SHIFT;
     const bitOffsetInStartChunk = searchUpToBitIndex_inclusive & BooleanArray.CHUNK_MASK;
 
