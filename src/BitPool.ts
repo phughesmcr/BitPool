@@ -1,984 +1,338 @@
 /**
- * @module BitPool
- * @description A high-performance BitPool with embedded hierarchy that avoids GC allocations.
- * @copyright 2025 the BitPool authors. All rights reserved.
- * @license MIT
+ * @description A high-performance BitPool for managing available/occupied indices.
+ * @copyright   2025 the BitPool authors. All rights reserved.
+ * @license     MIT
+ * @module      BitPool
  */
 
 import { BooleanArray } from "@phughesmcr/booleanarray";
 
 /**
- * A high-performance pool of single bits with embedded hierarchy to avoid GC allocations.
- * The hierarchy is stored at the end of the main array to provide O(log n) performance
- * without creating additional TypedArray objects.
+ * A high-performance bit pool for managing resource allocation.
+ * Uses false = available, true = occupied for optimal performance.
  */
-export class BitPool extends BooleanArray {
-  /** The actual size of the bitpool (excluding hierarchy space) */
-  #actualSize: number;
-
-  /** The index where hierarchy data starts in the array */
-  #hierarchyStartIndex: number;
-
-  /** The number of words used for hierarchy */
-  #hierarchyLength: number;
-
-  /** The next available hierarchy word to check */
-  #nextAvailableHierarchyIndex: number;
+export class BitPool {
+  /** The maximum safe size of the pool. */
+  static readonly MAX_SAFE_SIZE = BooleanArray.MAX_SAFE_SIZE;
 
   /**
-   * Maximum safe size for BitPool accounting for hierarchy overhead.
-   * This ensures the total size (data + hierarchy) doesn't exceed BooleanArray.MAX_SAFE_SIZE.
+   * Creates a new BitPool from an array of booleans or numbers.
+   * @param array The array to use as the pool
+   * @param size The size of the pool (default is the length of the array)
+   * @returns A new BitPool
+   *
+   * @example
+   * ```ts
+   * // Create a pool of 8 bits, explicitly specifying the first 4 bits
+   * const pool = BitPool.fromArray([false, true, false, true], 8); // [A, O, A, O, A, A, A, A]
+   *
+   * // Create a pool of 10 bits, explicitly occupying given bits
+   * const pool = BitPool.fromArray([1, 2, 3, 5, 8], 10); // [A, O, O, O, A, O, A, A, O, A]
+   * ```
    */
-  static get MAX_SAFE_BITPOOL_SIZE(): number {
-    // Calculate the maximum size where total words (data + hierarchy) <= BooleanArray max words
-    const maxTotalWords = Math.floor(BooleanArray.MAX_SAFE_SIZE / BooleanArray.BITS_PER_INT);
+  static fromArray<T extends boolean | number>(array: T[], size: number = array.length): BitPool {
+    if (size <= 0) {
+      throw new RangeError('"capacity" must be greater than 0');
+    }
 
-    // Solve: dataWords + Math.ceil(dataWords / 32) <= maxTotalWords
-    // In worst case: dataWords * (1 + 1/32) + 1 <= maxTotalWords
-    // So: dataWords <= (maxTotalWords - 1) * 32 / 33
-    const maxDataWords = Math.floor((maxTotalWords - 1) * BooleanArray.BITS_PER_INT / (BooleanArray.BITS_PER_INT + 1));
+    if (array.length === 0) {
+      return new BitPool(size);
+    }
 
-    return maxDataWords * BooleanArray.BITS_PER_INT;
+    // If array contains booleans, create BooleanArray directly
+    if (typeof array[0] === "boolean") {
+      const boolArray = array as boolean[];
+      const arr = new BooleanArray(size);
+      const copyLength = Math.min(boolArray.length, size);
+      for (let i = 0; i < copyLength; i++) {
+        arr.set(i, boolArray[i]!);
+      }
+      return new BitPool(arr);
+    }
+
+    // If array contains numbers, these are treated as indices to be marked as occupied.
+    const indicesToOccupy = array as number[];
+    const arr = new BooleanArray(size); // Initialize all as available (false)
+
+    for (const value of indicesToOccupy) {
+      // Validate each index
+      if (!Number.isSafeInteger(value)) {
+        throw new TypeError(`"value" in input array (${value}) must be a safe integer`);
+      }
+      if (value < 0) {
+        throw new RangeError(`"value" in input array (${value}) must be greater than or equal to 0`);
+      }
+      if (value >= size) {
+        throw new RangeError(
+          `"value" in input array (${value}) is out of bounds for pool capacity ${size}. Must be less than ${size}.`,
+        );
+      }
+      arr.set(value, true); // Mark as occupied
+    }
+    return new BitPool(arr);
   }
 
   /**
-   * Creates a new BitPool from an array of numbers
-   * @param arr The array of numbers to create the Bitpool from
-   * @param capacity The capacity of the Bitpool
-   * @returns a new BitPool
+   * Creates a new BitPool from a Uint32Array or number array.
+   * @param array The array to use as the pool
+   * @param capacity The size of the pool (default is the length of the array * 32)
+   * @returns A new BitPool
+   *
+   * @example
+   * ```ts
+   * // Create a pool of 128 bits, explicitly specifying each chunk of 32 bits
+   * const pool = BitPool.fromUint32Array([0b11110000, 0b00001111, 0b10101010], 128);
+   * ```
    */
-  static override fromArray(arr: number[], capacity: number): BitPool {
+  static fromUint32Array(array: ArrayLike<number>, capacity: number = array.length * 32): BitPool {
     if (capacity <= 0) {
       throw new RangeError('"capacity" must be greater than 0');
     }
-    if (capacity < arr.length * BooleanArray.BITS_PER_INT) {
-      throw new RangeError(
-        `For the array to fit, "capacity" must be greater than or equal to ${arr.length * BooleanArray.BITS_PER_INT}`,
-      );
+    if (capacity < array.length * 32) {
+      throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${array.length * 32}`);
     }
 
-    const pool = new BitPool(capacity);
-
-    // Set all bits to 1 initially (available)
-    pool.setAll();
-
-    for (let i = 0; i < arr.length; i++) {
-      const value = arr[i];
-
-      // Validate each value
-      if (!Number.isSafeInteger(value)) {
+    // Validate array values
+    for (let i = 0; i < array.length; i++) {
+      const value = array[i];
+      if (value === undefined || !Number.isSafeInteger(value)) {
         throw new TypeError('"value" must be a safe integer');
       }
-      if (value === undefined || value < 0) {
+      if (value < 0) {
         throw new RangeError('"value" must be greater than or equal to 0');
       }
+    }
 
-      // Each value represents a 32-bit chunk
-      const baseIndex = i << 5;
+    // Invert the bit patterns to match expected behavior (1 bits in input become occupied/true in BitPool)
+    const invertedArray = Array.from(array, (x) => ~x >>> 0);
+    const arr = BooleanArray.fromUint32Array(capacity, invertedArray);
+    return new BitPool(arr);
+  }
 
-      // For each bit in the current value
-      for (let bitPos = 0; bitPos < BooleanArray.BITS_PER_INT; bitPos++) {
-        const absolutePosition = baseIndex + bitPos;
-        if (absolutePosition >= capacity) break;
+  #availableCount: number;
+  #data: BooleanArray; // false = available, true = occupied
+  #nextAvailableIndex: number;
 
-        // If the bit is 0 in the input, mark it as occupied (false in our pool)
-        if ((value & (1 << bitPos)) === 0) {
-          pool.setBool(absolutePosition, false);
+  /**
+   * Creates a new BitPool from a BooleanArray.
+   * @param array The BooleanArray to use as the pool
+   */
+  constructor(array: BooleanArray);
+  /**
+   * Creates a new BitPool with the specified size.
+   * @param size The number of indices to manage (must be a positive integer)
+   * @throws {RangeError} if size is less than 1, or is greater than BitPool.MAX_SAFE_SIZE
+   * @throws {TypeError} if size is not a safe integer
+   */
+  constructor(size: number);
+  constructor(arrayOrSize: BooleanArray | number) {
+    if (typeof arrayOrSize === "number") {
+      if (arrayOrSize < 1) { // other validations are handled by BooleanArray
+        throw new RangeError('"size" must be greater than 0');
+      }
+      this.#data = new BooleanArray(arrayOrSize);
+      this.#availableCount = this.#data.size;
+    } else {
+      this.#data = arrayOrSize;
+      // Count available slots (false values)
+      this.#availableCount = 0;
+      for (let i = 0; i < this.#data.size; i++) {
+        if (!this.#data.get(i)) {
+          this.#availableCount++;
         }
       }
     }
-
-    pool.refresh();
-    return pool;
-  }
-
-  /**
-   * Creates a new BitPool with the specified capacity
-   *
-   * @param size The number of slots in the bitpool
-   * @returns A new BitPool instance.
-   * @throws {RangeError} if `size` is less than 1, or is greater than 0xffffffff (2 ** 32 - 1) === (4294967295)
-   * @throws {TypeError} if `size` is NaN
-   */
-  constructor(size: number) {
-    if (size <= 0) {
-      throw new RangeError('"size" must be greater than 0');
-    }
-
-    // Calculate space needed for hierarchy
-    const dataWords = Math.ceil(size / BooleanArray.BITS_PER_INT);
-    const hierarchyWords = Math.ceil(dataWords / BooleanArray.BITS_PER_INT);
-
-    // Allocate single array with hierarchy embedded at the end
-    const totalWords = dataWords + hierarchyWords;
-    const totalBits = totalWords * BooleanArray.BITS_PER_INT;
-
-    super(totalBits);
-
-    this.#actualSize = size;
-    this.#hierarchyStartIndex = dataWords;
-    this.#hierarchyLength = hierarchyWords;
-    this.#nextAvailableHierarchyIndex = 0;
-
-    // Initialize all data and hierarchy bits as available
-    this.fill(0xFFFFFFFF);
-
-    // Handle partial words at the end
-    this.#maskUnusedBits();
-  }
-
-  /** The actual size of the bitpool (excluding hierarchy space) */
-  override get size(): number {
-    return this.#actualSize;
-  }
-
-  /** The next available index in the bitpool */
-  get nextAvailableIndex(): number {
-    return this.#nextAvailableHierarchyIndex * BooleanArray.BITS_PER_INT;
-  }
-
-  /**
-   * Gets a hierarchy word at the specified index
-   * @param index The hierarchy word index
-   * @returns The hierarchy word value
-   */
-  getHierarchyWord(index: number): number {
-    if (index >= this.#hierarchyLength) return 0;
-    const value = this[this.#hierarchyStartIndex + index];
-    return value !== undefined ? value : 0;
-  }
-
-  /**
-   * Sets a hierarchy word at the specified index
-   * @param index The hierarchy word index
-   * @param value The value to set
-   */
-  #setHierarchyWord(index: number, value: number): void {
-    if (index < this.#hierarchyLength) {
-      this[this.#hierarchyStartIndex + index] = value;
-    }
-  }
-
-  /**
-   * Finds the first set bit in a 32-bit integer using bit manipulation
-   * @param value The value to scan
-   * @returns The position of the first set bit, or -1 if no bits are set
-   */
-  static findFirstSetBit(value: number): number {
-    if (value === 0) return -1;
-    return 31 - Math.clz32(value & -value);
-  }
-
-  /**
-   * Masks unused bits in partial words to ensure they don't interfere with operations
-   */
-  #maskUnusedBits(): void {
-    // Mask unused bits in the last data word
-    const lastDataWordIndex = Math.floor((this.#actualSize - 1) / BooleanArray.BITS_PER_INT);
-    const usedBitsInLastWord = this.#actualSize % BooleanArray.BITS_PER_INT;
-
-    if (usedBitsInLastWord > 0) {
-      const mask = (1 << usedBitsInLastWord) - 1;
-      const currentValue = this[lastDataWordIndex];
-      if (currentValue !== undefined) {
-        this[lastDataWordIndex] = currentValue & mask;
+    // Find the first available bit in the lowest chunk that has available bits
+    this.#nextAvailableIndex = -1;
+    for (let chunkIndex = 0; chunkIndex * 32 < this.#data.size; chunkIndex++) {
+      const chunkStart = chunkIndex * 32;
+      const chunkEnd = Math.min(chunkStart + 32, this.#data.size);
+      for (let i = chunkStart; i < chunkEnd; i++) {
+        if (!this.#data.get(i)) {
+          this.#nextAvailableIndex = i;
+          break;
+        }
       }
-    }
-
-    // Mask unused bits in the last hierarchy word
-    const dataWords = Math.ceil(this.#actualSize / BooleanArray.BITS_PER_INT);
-    const usedHierarchyBits = dataWords % BooleanArray.BITS_PER_INT;
-
-    if (usedHierarchyBits > 0 && this.#hierarchyLength > 0) {
-      const lastHierarchyIndex = this.#hierarchyLength - 1;
-      const hierarchyMask = (1 << usedHierarchyBits) - 1;
-      this.#setHierarchyWord(lastHierarchyIndex, this.getHierarchyWord(lastHierarchyIndex) & hierarchyMask);
+      if (this.#nextAvailableIndex !== -1) break;
     }
   }
 
-  /**
-   * @returns `true` if a given bit is currently acquired
-   * @throws {RangeError} if `bit` is not found
-   * @throws {TypeError} if `bit` is NaN
-   */
-  isOccupied(bit: number): boolean {
-    if (typeof bit !== "number" || isNaN(bit)) {
-      throw new TypeError('"bit" must be a number');
-    }
-    if (bit < 0 || bit >= this.#actualSize) {
-      throw new RangeError(`"bit" must be between 0 and ${this.#actualSize - 1}`);
-    }
+  /** Gets the number of available slots. */
+  get availableCount(): number {
+    return this.#availableCount;
+  }
 
-    const wordIndex = Math.floor(bit / BooleanArray.BITS_PER_INT);
-    const bitPosition = bit % BooleanArray.BITS_PER_INT;
-    const word = this[wordIndex];
+  /** Checks if the pool is empty (all slots available). */
+  get isEmpty(): boolean {
+    return this.#availableCount === this.#data.size;
+  }
 
-    return word !== undefined && (word & (1 << bitPosition)) === 0;
+  /** Checks if the pool is full (no slots available). */
+  get isFull(): boolean {
+    return this.#availableCount === 0;
+  }
+
+  /** Gets the next available index, or -1 if pool is full. */
+  get nextAvailableIndex(): number {
+    return this.#nextAvailableIndex;
+  }
+
+  /** Gets the number of occupied slots. */
+  get occupiedCount(): number {
+    return this.#data.size - this.#availableCount;
+  }
+
+  /** Gets the total size of the pool. */
+  get size(): number {
+    return this.#data.size;
   }
 
   /**
-   * Acquires an available bit in the Bitpool, setting it to '0'
-   * @returns The acquired bit's position or -1 if no bits are available
+   * Acquires the next available index.
+   * @returns The acquired index, or -1 if pool is full.
    */
   acquire(): number {
-    // Fast path: when nextAvailableHierarchyIndex is 0, try first word directly if it has bits
-    if (this.#nextAvailableHierarchyIndex === 0) {
-      const firstWord = this[0];
-      if (firstWord !== undefined && firstWord !== 0) {
-        // Use optimized bit scanning for first word
-        const bitPos = firstWord & 1 ? 0 : BitPool.findFirstSetBit(firstWord);
-        if (bitPos !== -1 && bitPos < this.#actualSize) {
-          const newValue = firstWord & ~(1 << bitPos);
-          this[0] = newValue;
-
-          // Update hierarchy only if word becomes empty
-          if (newValue === 0) {
-            // Inline hierarchy operations for index 0
-            const hierarchyWordIndex = this.#hierarchyStartIndex;
-            const currentHierarchyWord = this[hierarchyWordIndex];
-            if (currentHierarchyWord !== undefined) {
-              const newHierarchyWord = currentHierarchyWord & ~1;
-              this[hierarchyWordIndex] = newHierarchyWord;
-
-              if (newHierarchyWord === 0) {
-                this.#nextAvailableHierarchyIndex = this.#findNextAvailableHierarchyIndex(1);
-              }
-            }
-          }
-
-          return bitPos;
-        }
-      }
+    if (this.#availableCount === 0) {
+      return -1;
     }
+    const index = this.#nextAvailableIndex;
+    this.#data.set(index, true); // Mark as occupied
+    this.#availableCount--;
+    this.#nextAvailableIndex = this.findNextAvailable(index, true);
+    return index;
+  }
 
-    // Standard path: Start from the known available hierarchy index
-    let hierarchyIdx = this.#nextAvailableHierarchyIndex;
+  /** Clears the pool, making all indices available. */
+  clear(): void {
+    this.#data.fill(false); // All available
+    this.#nextAvailableIndex = 0;
+    this.#availableCount = this.#data.size;
+  }
 
-    while (hierarchyIdx < this.#hierarchyLength) {
-      const hierarchyWord = this.getHierarchyWord(hierarchyIdx);
-
-      if (hierarchyWord === 0) {
-        // No available chunks in this hierarchy word, move to next
-        hierarchyIdx++;
-        continue;
-      }
-
-      // Find first available chunk using bit scanning
-      const hierarchyBitPos = BitPool.findFirstSetBit(hierarchyWord);
-      if (hierarchyBitPos === -1) {
-        hierarchyIdx++;
-        continue;
-      }
-
-      const dataWordIdx = (hierarchyIdx << 5) + hierarchyBitPos;
-
-      // Check if we're beyond the data section
-      if (dataWordIdx >= this.#hierarchyStartIndex) break;
-
-      const dataWord = this[dataWordIdx];
-      if (dataWord === undefined || dataWord === 0) {
-        // Data word is actually full, update hierarchy and continue
-        this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-        continue;
-      }
-
-      // Find first available bit in the data word
-      const dataBitPos = BitPool.findFirstSetBit(dataWord);
-      if (dataBitPos === -1) {
-        // Data word is actually full, update hierarchy and continue
-        this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-        continue;
-      }
-
-      const absolutePosition = (dataWordIdx << 5) + dataBitPos;
-
-      // Check if position is within actual size
-      if (absolutePosition >= this.#actualSize) {
-        // Update hierarchy to mark this chunk as unavailable
-        this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-        continue;
-      }
-
-      // Acquire the bit
-      const newDataWord = dataWord & ~(1 << dataBitPos);
-      this[dataWordIdx] = newDataWord;
-
-      // Update hierarchy if data word becomes empty
-      if (newDataWord === 0) {
-        this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-
-        // Update next available hierarchy index if this hierarchy word becomes empty
-        if (this.getHierarchyWord(hierarchyIdx) === 0) {
-          this.#nextAvailableHierarchyIndex = this.#findNextAvailableHierarchyIndex(hierarchyIdx + 1);
-        }
-      }
-
-      return absolutePosition;
-    }
-
-    return -1; // No bits available
+  /** Clones the pool. */
+  clone(): BitPool {
+    return new BitPool(this.#data.clone());
   }
 
   /**
-   * Finds the next available hierarchy index starting from the given index
-   * @param startIdx The index to start searching from
-   * @returns The next available hierarchy index or the hierarchy length if none found
+   * Checks if an index is available.
+   * @param index The index to check
+   * @returns True if the index is available
+   * @throws {RangeError} When index is out of bounds
    */
-  #findNextAvailableHierarchyIndex(startIdx: number): number {
-    for (let i = startIdx; i < this.#hierarchyLength; i++) {
-      if (this.getHierarchyWord(i) !== 0) return i;
-    }
-    return this.#hierarchyLength;
+  isAvailable(index: number): boolean {
+    return !this.#data.get(index);
   }
 
   /**
-   * Reset the nextAvailableIdx value
-   * @param nextAvailableIndex The index to attempt to set the nextAvailableIdx to. Will fallback to the first available index if not available.
-   * @returns the bitpool
-   * @note you should probably never have to call this manually
+   * Checks if an index is occupied.
+   * @param index The index to check
+   * @returns True if the index is occupied
+   * @throws {RangeError} When index is out of bounds
    */
-  refresh(nextAvailableIndex?: number): this {
-    // If the nextAvailableIndex is provided, we need to validate it
-    if (typeof nextAvailableIndex === "number") {
-      if (isNaN(nextAvailableIndex)) {
-        throw new TypeError('"nextAvailableIndex" must be a number');
-      }
-
-      const hierarchyIndex = Math.floor(nextAvailableIndex / BooleanArray.BITS_PER_INT);
-      if (hierarchyIndex < 0 || hierarchyIndex >= this.#hierarchyLength) {
-        throw new RangeError(
-          `"nextAvailableIndex" must be within the bounds of the Bitpool (Between 0 and ${this.#actualSize - 1})`,
-        );
-      }
-
-      // If the hierarchy word at the specified index has available chunks, update the nextAvailableIndex
-      if (this.getHierarchyWord(hierarchyIndex) !== 0) {
-        this.#nextAvailableHierarchyIndex = hierarchyIndex;
-        return this;
-      }
+  isOccupied(index: number): boolean {
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
     }
+    return this.#data.get(index);
+  }
 
-    // Rebuild hierarchy from current state
-    this.#rebuildHierarchy();
-
-    // Find first available hierarchy index
-    this.#nextAvailableHierarchyIndex = this.#findNextAvailableHierarchyIndex(0);
-
-    return this;
+  /** Fills the pool, marking all indices as occupied. */
+  fill(): void {
+    this.#data.fill(true); // All occupied
+    this.#nextAvailableIndex = -1;
+    this.#availableCount = 0;
   }
 
   /**
-   * Rebuilds the hierarchy based on the current state of the data words
+   * Finds the next available index starting from the current index.
+   * @param startIndex The index to start searching from (optional)
+   * @param loop Whether to loop back to the beginning if the end is reached
+   * @returns The next available index or -1 if no more are available
    */
-  #rebuildHierarchy(): void {
-    const hierarchyStart = this.#hierarchyStartIndex;
-    const hierarchyLength = this.#hierarchyLength;
-
-    for (let h = 0; h < hierarchyLength; h++) {
-      let hierarchyWord = 0;
-      const baseDataWordIdx = h << 5; // Optimized: h * 32
-
-      for (let b = 0; b < BooleanArray.BITS_PER_INT; b++) {
-        const dataWordIdx = baseDataWordIdx + b;
-        if (dataWordIdx >= hierarchyStart) break;
-
-        const dataValue = this[dataWordIdx];
-        if (dataValue !== undefined && dataValue !== 0) {
-          hierarchyWord |= 1 << b;
-        }
-      }
-      this[hierarchyStart + h] = hierarchyWord;
+  findNextAvailable(startIndex?: number, loop: boolean = false): number {
+    if (this.#availableCount === 0) {
+      return -1;
     }
-  }
+    const currentIndex = startIndex ?? this.#nextAvailableIndex;
 
-  /**
-   * Releases a bit in the Bitpool, setting it back to '1'
-   * @param value The position of the bit to release
-   * @returns The Bitpool
-   * @throws {TypeError} if `value` is NaN
-   */
-  release(value: number): this {
-    if (typeof value !== "number" || isNaN(value)) {
-      throw new TypeError('"value" must be a number');
+    // Ensure we don't search beyond bounds
+    if (currentIndex < 0 || currentIndex >= this.#data.size) {
+      return this.#data.indexOf(false);
     }
 
-    const dataWordIdx = Math.floor(value / BooleanArray.BITS_PER_INT);
-    const bitPosition = value % BooleanArray.BITS_PER_INT;
-
-    if (dataWordIdx < 0 || dataWordIdx >= this.#hierarchyStartIndex || value >= this.#actualSize) {
-      return this;
-    }
-
-    const currentValue = this[dataWordIdx];
-    if (currentValue === undefined) return this;
-
-    const wasEmpty = currentValue === 0;
-
-    // Set the bit back to 1
-    this[dataWordIdx] = currentValue | (1 << bitPosition);
-
-    // Update hierarchy if data word was previously empty
-    if (wasEmpty) {
-      const hierarchyIdx = Math.floor(dataWordIdx / BooleanArray.BITS_PER_INT);
-      const hierarchyBitPos = dataWordIdx % BooleanArray.BITS_PER_INT;
-
-      if (hierarchyIdx < this.#hierarchyLength) {
-        const hierarchyWord = this.getHierarchyWord(hierarchyIdx);
-        this.#setHierarchyWord(hierarchyIdx, hierarchyWord | (1 << hierarchyBitPos));
-
-        // Update next available hierarchy index if this makes an earlier position available
-        if (hierarchyIdx < this.#nextAvailableHierarchyIndex) {
-          this.#nextAvailableHierarchyIndex = hierarchyIdx;
-        }
-      }
-    }
-
-    return this;
-  }
-
-  /**
-   * Get the indices of the set bits in the array
-   * @param startIndex the start index to get the indices from [default = 0]
-   * @param endIndex the end index to get the indices from [default = this.size]
-   * @returns Iterator of indices where bits are set
-   */
-  override *truthyIndices(startIndex: number = 0, endIndex?: number): IterableIterator<number> {
-    // Use actual size as default for endIndex if not provided
-    const actualEndIndex: number = endIndex ?? this.#actualSize;
-
-    // Validate and adjust range
-    startIndex = Math.max(0, startIndex);
-    const finalEndIndex: number = Math.min(actualEndIndex, this.#actualSize);
-
-    if (startIndex >= finalEndIndex) return;
-
-    // Calculate word boundaries
-    const startWord = Math.floor(startIndex / BooleanArray.BITS_PER_INT);
-    const endWord = Math.floor((finalEndIndex - 1) / BooleanArray.BITS_PER_INT);
-
-    for (let wordIndex = startWord; wordIndex <= endWord; wordIndex++) {
-      const word = this[wordIndex];
-      if (word === undefined || word === 0) continue;
-
-      // Calculate bit range for this word
-      const firstBit = wordIndex === startWord ? startIndex % BooleanArray.BITS_PER_INT : 0;
-      const lastBit = wordIndex === endWord
-        ? (finalEndIndex - 1) % BooleanArray.BITS_PER_INT
-        : BooleanArray.BITS_PER_INT - 1;
-
-      // Check each bit in the word
-      for (let bitPos = firstBit; bitPos <= lastBit; bitPos++) {
-        if ((word & (1 << bitPos)) !== 0) {
-          yield wordIndex * BooleanArray.BITS_PER_INT + bitPos;
-        }
-      }
-    }
-  }
-
-  /**
-   * Get the boolean state of a bit
-   * @param index the bit index to get the state of
-   * @returns the boolean state of the bit
-   */
-  override getBool(index: number): boolean {
-    BooleanArray.validateValue(index, this.#actualSize);
-    return (this[index >>> BooleanArray.CHUNK_SHIFT]! & (1 << (index & BooleanArray.CHUNK_MASK))) !== 0;
-  }
-
-  /**
-   * Get bulk boolean values for better performance
-   * @param startIndex the start index to get the booleans from
-   * @param count the number of booleans to get
-   * @returns an array of booleans
-   */
-  override getBools(startIndex: number, count: number): boolean[] {
-    BooleanArray.validateValue(startIndex, this.#actualSize);
-    BooleanArray.validateValue(startIndex + count, this.#actualSize + 1);
-    const result: boolean[] = new Array(count);
-    if (count === 0) return result;
-
-    let currentChunkIndex = -1;
-    let currentChunkValue = 0;
-
-    for (let i = 0; i < count; i++) {
-      const index = startIndex + i;
-      const chunkForThisBit = index >>> BooleanArray.CHUNK_SHIFT;
-      if (chunkForThisBit !== currentChunkIndex) {
-        currentChunkIndex = chunkForThisBit;
-        currentChunkValue = this[currentChunkIndex]!;
-      }
-      const offset = index & BooleanArray.CHUNK_MASK;
-      result[i] = (currentChunkValue & (1 << offset)) !== 0;
+    const result = this.#data.indexOf(false, currentIndex + 1);
+    if (result === -1 && loop) {
+      return this.#data.indexOf(false);
     }
     return result;
   }
 
+  /** Refreshes the pool, ensuring the next available index is set to the first available index. */
+  refresh(): void {
+    this.#nextAvailableIndex = this.#data.indexOf(false);
+  }
+
   /**
-   * Set the boolean state of a bit
-   * @param index the bit index to set the state of
-   * @param value the boolean state to set the bit to
-   * @returns `this` for chaining
+   * Releases an occupied index back to the pool.
+   * @param index The index to release
    */
-  override setBool(index: number, value: boolean): this {
-    BooleanArray.validateValue(index, this.#actualSize);
-    const chunk = index >>> BooleanArray.CHUNK_SHIFT;
-    const mask = 1 << (index & BooleanArray.CHUNK_MASK);
-
-    const wasEmpty = this[chunk] === 0;
-
-    if (value) {
-      this[chunk]! |= mask;
-    } else {
-      this[chunk]! &= ~mask;
+  release(index: number): void {
+    // Throw for NaN specifically as expected by tests
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
     }
 
-    // Update hierarchy if word state changed between empty/non-empty
-    const isNowEmpty = this[chunk] === 0;
-    if (wasEmpty !== isNowEmpty) {
-      const hierarchyIdx = Math.floor(chunk / BooleanArray.BITS_PER_INT);
-      const hierarchyBitPos = chunk % BooleanArray.BITS_PER_INT;
+    // Handle other invalid inputs gracefully
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.#data.size) {
+      return; // Ignore invalid indices
+    }
 
-      if (hierarchyIdx < this.#hierarchyLength) {
-        const hierarchyWord = this.getHierarchyWord(hierarchyIdx);
-        if (isNowEmpty) {
-          // Word became empty, clear hierarchy bit
-          this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-        } else {
-          // Word became non-empty, set hierarchy bit
-          this.#setHierarchyWord(hierarchyIdx, hierarchyWord | (1 << hierarchyBitPos));
-          // Update next available hierarchy index if this makes an earlier position available
-          if (hierarchyIdx < this.#nextAvailableHierarchyIndex) {
-            this.#nextAvailableHierarchyIndex = hierarchyIdx;
-          }
-        }
+    if (!this.#data.get(index)) {
+      return; // Already available
+    }
+    this.#data.set(index, false); // Mark as available
+    this.#availableCount++;
+
+    if (index < this.#nextAvailableIndex) {
+      this.#nextAvailableIndex = index;
+    }
+  }
+
+  /** Iterator that yields the underlying uint32 array values. */
+  *[Symbol.iterator](): IterableIterator<number> {
+    for (let i = 0; i < this.#data.length; i++) {
+      yield this.#data.buffer[i]!;
+    }
+  }
+
+  /** Iterator that yields all available indices in the pool. */
+  *availableIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
+    const buffer = this.#data.buffer;
+    const actualStartIndex = Math.max(startIndex, 0);
+    const actualEndIndex = Math.min(endIndex, this.#data.size);
+    for (let i = actualStartIndex; i < actualEndIndex; i++) {
+      const chunkIndex = i >>> 5; // Divide by 32 (2^5)
+      const bitPosition = i & 31; // Modulo 32
+      const bit = (buffer[chunkIndex]! & (1 << bitPosition)) !== 0;
+      if (!bit) { // false = available
+        yield i;
       }
     }
-
-    return this;
   }
 
-  /**
-   * Set a range of bits to a given value
-   * @param startIndex the start index to set the range from
-   * @param count the number of booleans to set
-   * @param value the boolean value to set
-   * @returns `this` for chaining
-   */
-  override setRange(startIndex: number, count: number, value: boolean): this {
-    if (count === 0) return this;
-
-    BooleanArray.validateValue(startIndex, this.#actualSize);
-    BooleanArray.validateValue(startIndex + count, this.#actualSize + 1);
-
-    const endIndex = startIndex + count - 1;
-    const startChunk = startIndex >>> BooleanArray.CHUNK_SHIFT;
-    const endChunk = endIndex >>> BooleanArray.CHUNK_SHIFT;
-
-    // First pass: update data chunks and track hierarchy range
-    let minHierarchyIdx = this.#hierarchyLength;
-    let maxHierarchyIdx = -1;
-
-    for (let chunkIdx = startChunk; chunkIdx <= endChunk; chunkIdx++) {
-      const wasEmpty = this[chunkIdx] === 0;
-
-      // Calculate bit range for this chunk
-      const firstBit = chunkIdx === startChunk ? startIndex & BooleanArray.CHUNK_MASK : 0;
-      const lastBit = chunkIdx === endChunk ? endIndex & BooleanArray.CHUNK_MASK : BooleanArray.CHUNK_MASK;
-
-      // Create mask for the bits to modify
-      const bitCount = lastBit - firstBit + 1;
-      const mask = bitCount === BooleanArray.BITS_PER_INT
-        ? BooleanArray.ALL_BITS
-        : (((1 << bitCount) - 1) << firstBit) >>> 0;
-
-      if (value) {
-        this[chunkIdx]! |= mask;
-      } else {
-        this[chunkIdx]! &= ~mask;
-      }
-
-      const isNowEmpty = this[chunkIdx] === 0;
-
-      // Track hierarchy range that needs updating
-      if (wasEmpty !== isNowEmpty) {
-        const hierarchyIdx = Math.floor(chunkIdx / BooleanArray.BITS_PER_INT);
-        if (hierarchyIdx < this.#hierarchyLength) {
-          minHierarchyIdx = Math.min(minHierarchyIdx, hierarchyIdx);
-          maxHierarchyIdx = Math.max(maxHierarchyIdx, hierarchyIdx);
-        }
+  /** Iterator that yields all occupied indices in the pool. */
+  *occupiedIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
+    const buffer = this.#data.buffer;
+    const actualStartIndex = Math.max(startIndex, 0);
+    const actualEndIndex = Math.min(endIndex, this.#data.size);
+    for (let i = actualStartIndex; i < actualEndIndex; i++) {
+      const chunkIndex = i >>> 5; // Divide by 32 (2^5)
+      const bitPosition = i & 31; // Modulo 32
+      const bit = (buffer[chunkIndex]! & (1 << bitPosition)) !== 0;
+      if (bit) { // true = occupied
+        yield i;
       }
     }
-
-    // Second pass: update only the hierarchy words that changed
-    for (let hierarchyIdx = minHierarchyIdx; hierarchyIdx <= maxHierarchyIdx; hierarchyIdx++) {
-      let newHierarchyWord = 0;
-
-      const baseDataWordIdx = hierarchyIdx << 5;
-      for (let b = 0; b < BooleanArray.BITS_PER_INT; b++) {
-        const dataWordIdx = baseDataWordIdx + b;
-        if (dataWordIdx >= this.#hierarchyStartIndex) break;
-
-        if (this[dataWordIdx] !== 0) {
-          newHierarchyWord |= 1 << b;
-        }
-      }
-
-      this.#setHierarchyWord(hierarchyIdx, newHierarchyWord);
-
-      // Update next available hierarchy index if needed
-      if (newHierarchyWord !== 0 && hierarchyIdx < this.#nextAvailableHierarchyIndex) {
-        this.#nextAvailableHierarchyIndex = hierarchyIdx;
-      }
-    }
-
-    return this;
-  }
-
-  /**
-   * Toggle the boolean state of a bit
-   * @param index the bit index to toggle the state of
-   * @returns the new boolean state of the bit
-   */
-  override toggleBool(index: number): boolean {
-    BooleanArray.validateValue(index, this.#actualSize);
-    const chunk = index >>> BooleanArray.CHUNK_SHIFT;
-    const mask = 1 << (index & BooleanArray.CHUNK_MASK);
-
-    const wasEmpty = this[chunk] === 0;
-    this[chunk]! ^= mask;
-    const isNowEmpty = this[chunk] === 0;
-    const newValue = (this[chunk]! & mask) !== 0;
-
-    // Update hierarchy if word state changed between empty/non-empty
-    if (wasEmpty !== isNowEmpty) {
-      const hierarchyIdx = Math.floor(chunk / BooleanArray.BITS_PER_INT);
-      const hierarchyBitPos = chunk % BooleanArray.BITS_PER_INT;
-
-      if (hierarchyIdx < this.#hierarchyLength) {
-        const hierarchyWord = this.getHierarchyWord(hierarchyIdx);
-        if (isNowEmpty) {
-          this.#setHierarchyWord(hierarchyIdx, hierarchyWord & ~(1 << hierarchyBitPos));
-        } else {
-          this.#setHierarchyWord(hierarchyIdx, hierarchyWord | (1 << hierarchyBitPos));
-          if (hierarchyIdx < this.#nextAvailableHierarchyIndex) {
-            this.#nextAvailableHierarchyIndex = hierarchyIdx;
-          }
-        }
-      }
-    }
-
-    return newValue;
-  }
-
-  /**
-   * Iterates over each bit in the data portion of the array
-   * @param callback the callback to execute for each bit
-   * @param startIndex the start index to iterate from [default = 0]
-   * @param count the number of booleans to iterate over [default = this.size - startIndex]
-   * @returns the current BitPool
-   */
-  override forEachBool(
-    callback: (index: number, value: boolean, array: this) => void,
-    startIndex: number = 0,
-    count?: number,
-  ): this {
-    // Use remaining elements as default for count if not provided
-    const actualCount: number = count ?? (this.#actualSize - startIndex);
-
-    if (actualCount === 0) return this;
-    BooleanArray.validateValue(startIndex, this.#actualSize);
-    BooleanArray.validateValue(startIndex + actualCount, this.#actualSize + 1);
-
-    let currentChunkIndex = -1;
-    let currentChunkValue = 0;
-
-    const endIndex = startIndex + actualCount;
-    for (let i = startIndex; i < endIndex; i++) {
-      const chunkForThisBit = i >>> BooleanArray.CHUNK_SHIFT;
-      if (chunkForThisBit !== currentChunkIndex) {
-        currentChunkIndex = chunkForThisBit;
-        currentChunkValue = this[currentChunkIndex]!;
-      }
-      const offset = i & BooleanArray.CHUNK_MASK;
-      callback(i, (currentChunkValue & (1 << offset)) !== 0, this);
-    }
-    return this;
-  }
-
-  /**
-   * Get the index of the first set bit starting from a given index (only searches data portion)
-   * @param startIndex the index to start searching from [default = 0]
-   * @returns the index of the first set bit, or -1 if no bits are set
-   */
-  override getFirstSetIndex(startIndex: number = 0): number {
-    BooleanArray.validateValue(startIndex, this.#actualSize);
-
-    const startChunk = startIndex >>> BooleanArray.CHUNK_SHIFT;
-    const startOffset = startIndex & BooleanArray.CHUNK_MASK;
-    const maxChunk = Math.floor((this.#actualSize - 1) / BooleanArray.BITS_PER_INT);
-
-    // Handle first chunk with mask for bits after startOffset
-    if (startChunk <= maxChunk) {
-      const firstChunkMask = (BooleanArray.ALL_BITS << startOffset) >>> 0;
-      const firstChunk = this[startChunk]! & firstChunkMask;
-      if (firstChunk !== 0) {
-        const bitPos = Math.clz32(firstChunk & -firstChunk) ^ 31;
-        const index = (startChunk << BooleanArray.CHUNK_SHIFT) + bitPos;
-        return index < this.#actualSize ? index : -1;
-      }
-    }
-
-    // Search remaining chunks (only in data portion)
-    for (let i = startChunk + 1; i <= maxChunk; i++) {
-      const chunk = this[i]!;
-      if (chunk !== 0) {
-        const bitPos = Math.clz32(chunk & -chunk) ^ 31;
-        const index = (i << BooleanArray.CHUNK_SHIFT) + bitPos;
-        return index < this.#actualSize ? index : -1;
-      }
-    }
-
-    return -1;
-  }
-
-  /**
-   * Get the index of the last set bit (only searches data portion)
-   * @param startIndex the index to start searching from (exclusive upper bound) [default = this.size]
-   * @returns the index of the last set bit, or -1 if no bits are set in the specified range
-   */
-  override getLastSetIndex(startIndex?: number): number {
-    // Use actual size as default for startIndex if not provided
-    const actualStartIndex: number = startIndex ?? this.#actualSize;
-
-    BooleanArray.validateValue(actualStartIndex, this.#actualSize + 1);
-
-    if (actualStartIndex === 0) return -1;
-
-    const searchUpToBitIndex_inclusive = actualStartIndex - 1;
-    const startChunk = searchUpToBitIndex_inclusive >>> BooleanArray.CHUNK_SHIFT;
-    const bitOffsetInStartChunk = searchUpToBitIndex_inclusive & BooleanArray.CHUNK_MASK;
-
-    // Handle the first chunk (the one containing searchUpToBitIndex_inclusive)
-    const firstChunkValue = this[startChunk]!;
-    if (firstChunkValue !== 0) {
-      let mask;
-      if (bitOffsetInStartChunk === 31) {
-        mask = BooleanArray.ALL_BITS;
-      } else {
-        mask = ((1 << (bitOffsetInStartChunk + 1)) - 1) >>> 0;
-      }
-      const maskedChunk = firstChunkValue & mask;
-      if (maskedChunk !== 0) {
-        const bitPos = 31 - Math.clz32(maskedChunk);
-        return (startChunk << BooleanArray.CHUNK_SHIFT) + bitPos;
-      }
-    }
-
-    // Search remaining chunks backwards (only in data portion)
-    for (let i = startChunk - 1; i >= 0; i--) {
-      const chunkValue = this[i]!;
-      if (chunkValue !== 0) {
-        const bitPos = 31 - Math.clz32(chunkValue);
-        return (i << BooleanArray.CHUNK_SHIFT) + bitPos;
-      }
-    }
-
-    return -1;
-  }
-
-  /**
-   * Get the number of set bits in the data portion of the array
-   * @returns the number of set bits in the data portion
-   */
-  override getPopulationCount(): number {
-    let count = 0;
-    const maxDataChunk = Math.floor((this.#actualSize - 1) / BooleanArray.BITS_PER_INT);
-
-    // Count all full data chunks
-    for (let i = 0; i < maxDataChunk; i++) {
-      let value = this[i]!;
-      value = value - ((value >>> 1) & 0x55555555);
-      value = (value & 0x33333333) + ((value >>> 2) & 0x33333333);
-      value = (value + (value >>> 4)) & 0x0f0f0f0f;
-      count += (value * 0x01010101) >>> 24;
-    }
-
-    // Handle last data chunk if it exists
-    if (maxDataChunk >= 0 && maxDataChunk < this.#hierarchyStartIndex) {
-      const remainingBits = this.#actualSize % 32;
-      const lastChunkMask = remainingBits === 0 ? 4294967295 : ((1 << remainingBits) - 1) >>> 0;
-      let value = this[maxDataChunk]! & lastChunkMask;
-      value = value - ((value >>> 1) & 0x55555555);
-      value = (value & 0x33333333) + ((value >>> 2) & 0x33333333);
-      value = (value + (value >>> 4)) & 0x0f0f0f0f;
-      count += (value * 0x01010101) >>> 24;
-    }
-
-    return count;
-  }
-
-  /**
-   * Check if the data portion of the array is empty
-   * @returns `true` if the data portion is empty, `false` otherwise
-   */
-  override isEmpty(): boolean {
-    const maxDataChunk = Math.floor((this.#actualSize - 1) / BooleanArray.BITS_PER_INT);
-
-    for (let i = 0; i <= maxDataChunk && i < this.#hierarchyStartIndex; i++) {
-      if (this[i] !== 0) return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Creates a copy of this BitPool
-   * @returns a new BitPool with the same data contents
-   */
-  override clone(): BitPool {
-    const copy = new BitPool(this.#actualSize);
-
-    // Copy only the data portion
-    for (let i = 0; i < this.#hierarchyStartIndex; i++) {
-      copy[i] = this[i]!;
-    }
-
-    // Rebuild the hierarchy for the copy
-    copy.refresh();
-
-    return copy;
-  }
-
-  /**
-   * Clear all allocations (marks all bits as occupied/unavailable)
-   * @returns `this` for chaining
-   */
-  override clear(): this {
-    // Clear only the data portion (mark as occupied)
-    for (let i = 0; i < this.#hierarchyStartIndex; i++) {
-      this[i] = 0;
-    }
-
-    // Clear the hierarchy
-    for (let i = 0; i < this.#hierarchyLength; i++) {
-      this.#setHierarchyWord(i, 0);
-    }
-
-    this.#nextAvailableHierarchyIndex = this.#hierarchyLength;
-
-    return this;
-  }
-
-  /**
-   * Set all bits in the data portion to `true` (marks all bits as available)
-   * @returns `this` for chaining
-   */
-  override setAll(): this {
-    // Set all data chunks to ALL_BITS
-    for (let i = 0; i < this.#hierarchyStartIndex; i++) {
-      this[i] = BooleanArray.ALL_BITS;
-    }
-
-    // Mask off any excess bits in the last data chunk if needed
-    const remainingBits = this.#actualSize % BooleanArray.BITS_PER_INT;
-    if (remainingBits > 0) {
-      const lastIndex = this.#hierarchyStartIndex - 1;
-      const mask = ((1 << remainingBits) - 1) >>> 0;
-      this[lastIndex] = mask;
-    }
-
-    // Rebuild hierarchy
-    this.#rebuildHierarchy();
-    this.#nextAvailableHierarchyIndex = this.#findNextAvailableHierarchyIndex(0);
-
-    return this;
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override and(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override or(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override xor(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override nand(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override nor(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override not(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override difference(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
-  }
-
-  /**
-   * @deprecated
-   * Bitwise operations are not supported on BitPool as they would corrupt the hierarchy.
-   * Use refresh() after direct array manipulation if needed.
-   */
-  override xnor(): this {
-    throw new Error(
-      "Bitwise operations are not supported on BitPool. Use acquire()/release() or call refresh() after direct manipulation.",
-    );
   }
 }

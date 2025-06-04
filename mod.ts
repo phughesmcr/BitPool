@@ -5,7 +5,7 @@
  * @license     MIT
  */
 
-import { BitPool } from "./src/BitPool.ts";
+import { BitPool } from "./src/BitPool.old.ts";
 
 /**
  * BitPool is a fast pool of single bits backed by a Uint32Array.
