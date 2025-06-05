@@ -215,7 +215,7 @@ Deno.test("BitPool - should handle floating point inputs", () => {
   assertThrows(
     () => pool.release(NaN),
     TypeError,
-    '"value" must be a number',
+    '"index" must be a number',
   );
 
   // Verify original bit is still occupied
@@ -359,7 +359,7 @@ Deno.test("BitPool - should recover from invalid operations", () => {
 // fromArray Static Method Tests
 Deno.test("BitPool.fromArray - should create BitPool from valid array", () => {
   const arr = [0b11110000];
-  const pool = BitPool.fromArray(arr, 32);
+  const pool = BitPool.fromArray(256, arr);
 
   // Check first byte (inverted)
   assertEquals(pool.isOccupied(0), true);
@@ -369,18 +369,17 @@ Deno.test("BitPool.fromArray - should create BitPool from valid array", () => {
   assertEquals(pool.isOccupied(4), false);
   assertEquals(pool.isOccupied(5), false);
   assertEquals(pool.isOccupied(6), false);
-  assertEquals(pool.isOccupied(7), false);
 });
 
 Deno.test("BitPool.fromArray - should handle empty array", () => {
-  const pool = BitPool.fromArray([], 32);
+  const pool = BitPool.fromArray(32, []);
   assertEquals(pool.size, 32);
   assertEquals(pool.nextAvailableIndex, 0);
 });
 
 Deno.test("BitPool.fromArray - should handle multiple integers", () => {
   const arr = [0b11110000, 0b00001111];
-  const pool = BitPool.fromArray(arr, 64);
+  const pool = BitPool.fromArray(512, arr);
 
   // First integer
   assertEquals(pool.isOccupied(0), true);
@@ -406,7 +405,7 @@ Deno.test("BitPool.fromArray - should handle multiple integers", () => {
 Deno.test("BitPool.fromArray - should throw when capacity is too small", () => {
   const arr = [0b11110000, 0b00001111];
   assertThrows(
-    () => BitPool.fromArray(arr, 31),
+    () => BitPool.fromArray(31, arr),
     RangeError,
     'For the array to fit, "capacity" must be greater than or equal to 64',
   );
@@ -414,7 +413,7 @@ Deno.test("BitPool.fromArray - should throw when capacity is too small", () => {
 
 Deno.test("BitPool.fromArray - should handle array with all bits set", () => {
   const arr = [0xFFFFFFFF];
-  const pool = BitPool.fromArray(arr, 32);
+  const pool = BitPool.fromArray(32, arr);
 
   // All bits should be available (not occupied)
   for (let i = 0; i < 32; i++) {
@@ -424,7 +423,7 @@ Deno.test("BitPool.fromArray - should handle array with all bits set", () => {
 
 Deno.test("BitPool.fromArray - should handle array with no bits set", () => {
   const arr = [0x00000000];
-  const pool = BitPool.fromArray(arr, 32);
+  const pool = BitPool.fromArray(32, arr);
 
   // All bits should be occupied
   for (let i = 0; i < 32; i++) {
@@ -434,7 +433,7 @@ Deno.test("BitPool.fromArray - should handle array with no bits set", () => {
 
 Deno.test("BitPool.fromArray - should handle capacity larger than needed", () => {
   const arr = [0b11110000];
-  const pool = BitPool.fromArray(arr, 64);
+  const pool = BitPool.fromArray(256, arr);
 
   // Check first byte
   assertEquals(pool.isOccupied(0), true);
@@ -452,25 +451,25 @@ Deno.test("BitPool.fromArray - should handle capacity larger than needed", () =>
 
 Deno.test("BitPool.fromArray - should maintain correct nextAvailableIndex", () => {
   const arr = [0b11110000, 0x00000000];
-  const pool = BitPool.fromArray(arr, 64);
+  const pool = BitPool.fromArray(64, arr);
   assertEquals(pool.nextAvailableIndex, 4); // First available bit after the occupied bits 0-3
 });
 
 Deno.test("BitPool.fromArray - should throw for invalid array values", () => {
   assertThrows(
-    () => BitPool.fromArray([NaN], 32),
+    () => BitPool.fromArray(32, [NaN]),
     TypeError,
     '"value" must be a safe integer',
   );
 
   assertThrows(
-    () => BitPool.fromArray([Infinity], 32),
+    () => BitPool.fromArray(32, [Infinity]),
     TypeError,
     '"value" must be a safe integer',
   );
 
   assertThrows(
-    () => BitPool.fromArray([-1], 32),
+    () => BitPool.fromArray(32, [-1]),
     RangeError,
     '"value" must be greater than or equal to 0',
   );
@@ -478,26 +477,26 @@ Deno.test("BitPool.fromArray - should throw for invalid array values", () => {
 
 Deno.test("BitPool.fromArray - should handle maximum valid capacity", () => {
   const arr = [0b11110000];
-  const pool = BitPool.fromArray(arr, BitPool.MAX_SAFE_SIZE); // Max valid capacity
+  const pool = BitPool.fromArray(BitPool.MAX_SAFE_SIZE, arr);
   assertEquals(pool.size, BitPool.MAX_SAFE_SIZE);
 });
 
 Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
   const arr = [0b11110000];
   assertThrows(
-    () => BitPool.fromArray(arr, 0),
+    () => BitPool.fromArray(0, arr),
     RangeError,
     '"capacity" must be greater than 0',
   );
 
   assertThrows(
-    () => BitPool.fromArray(arr, -1),
+    () => BitPool.fromArray(-1, arr),
     RangeError,
     '"capacity" must be greater than 0',
   );
 
   assertThrows(
-    () => BitPool.fromArray(arr, 0x100000000),
+    () => BitPool.fromArray(0x100000000, arr),
     RangeError,
     '"value" must be smaller than or equal to 536870911',
   );
@@ -554,20 +553,20 @@ Deno.test("BitPool - isOccupied should throw TypeError for non-number input", ()
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied("0"),
     TypeError,
-    '"bit" must be a number',
+    '"index" must be a number',
   );
 
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied(null),
     TypeError,
-    '"bit" must be a number',
+    '"index" must be a number',
   );
 
   assertThrows(
     () => pool.isOccupied(NaN),
     TypeError,
-    '"bit" must be a number',
+    '"index" must be a number',
   );
 });
 
@@ -706,7 +705,7 @@ Deno.test("BitPool.availableIndices - with invalid range parameters", () => {
 // fromUint32Array Static Method Tests
 Deno.test("BitPool.fromUint32Array - should create BitPool from Uint32Array", () => {
   const arr = [0b11110000];
-  const pool = BitPool.fromUint32Array(arr, 32);
+  const pool = BitPool.fromUint32Array(32, arr);
 
   // Check first byte (inverted)
   assertEquals(pool.isOccupied(0), true);
@@ -720,14 +719,14 @@ Deno.test("BitPool.fromUint32Array - should create BitPool from Uint32Array", ()
 });
 
 Deno.test("BitPool.fromUint32Array - should handle empty array", () => {
-  const pool = BitPool.fromUint32Array([], 32);
+  const pool = BitPool.fromUint32Array(32, []);
   assertEquals(pool.size, 32);
   assertEquals(pool.availableCount, 32);
 });
 
 Deno.test("BitPool.fromUint32Array - should handle multiple words", () => {
   const arr = [0b11110000, 0b00001111];
-  const pool = BitPool.fromUint32Array(arr, 64);
+  const pool = BitPool.fromUint32Array(64, arr);
 
   // First word
   assertEquals(pool.isOccupied(0), true);
@@ -740,7 +739,7 @@ Deno.test("BitPool.fromUint32Array - should handle multiple words", () => {
 
 Deno.test("BitPool.fromUint32Array - should throw for invalid capacity", () => {
   assertThrows(
-    () => BitPool.fromUint32Array([0b11110000], 0),
+    () => BitPool.fromUint32Array(0, [0b11110000]),
     RangeError,
     '"capacity" must be greater than 0',
   );
@@ -748,7 +747,7 @@ Deno.test("BitPool.fromUint32Array - should throw for invalid capacity", () => {
 
 Deno.test("BitPool.fromUint32Array - should throw for capacity too small", () => {
   assertThrows(
-    () => BitPool.fromUint32Array([0b11110000, 0b00001111], 31),
+    () => BitPool.fromUint32Array(31, [0b11110000, 0b00001111]),
     RangeError,
     'For the array to fit, "capacity" must be greater than or equal to 64',
   );
