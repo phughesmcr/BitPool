@@ -34,7 +34,7 @@
     "exclude": ["*.md", "LICENSE"]
   },
   "imports": {
-    "@phughesmcr/booleanarray": "jsr:@phughesmcr/booleanarray@^0.8.1"
+    "@phughesmcr/booleanarray": "jsr:@phughesmcr/booleanarray@^0.9.0"
   },
   "tasks": {
     "example": {
