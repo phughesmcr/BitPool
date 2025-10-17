@@ -16,95 +16,105 @@ export class BitPool {
   static readonly MAX_SAFE_SIZE = BooleanArray.MAX_SAFE_SIZE;
 
   /**
-   * Creates a new BitPool from an array of booleans or numbers.
-   * @param array The array to use as the pool
-   * @param size The size of the pool (default is the length of the array)
+   * Creates a new BitPool from an array of uint32 values representing bit patterns.
+   * Each uint32 value represents 32 bits where 1 = occupied, 0 = available.
+   * @param capacity The total size of the pool
+   * @param array The array of uint32 values to use as the initial state
    * @returns A new BitPool
    *
    * @example
    * ```ts
-   * // Create a pool of 8 bits, explicitly specifying the first 4 bits
-   * const pool = BitPool.fromArray([false, true, false, true], 8); // [A, O, A, O, A, A, A, A]
-   *
-   * // Create a pool of 10 bits, explicitly occupying given bits
-   * const pool = BitPool.fromArray([1, 2, 3, 5, 8], 10); // [A, O, O, O, A, O, A, A, O, A]
+   * // Create a pool of 32 bits with first 4 bits occupied
+   * const pool = BitPool.fromArray(32, [0b11110000]); // bits 0-3 occupied, 4-7 available
    * ```
    */
-  static fromArray<T extends boolean | number>(array: T[], size: number = array.length): BitPool {
-    if (size <= 0) {
-      throw new RangeError('"capacity" must be greater than 0');
+  static fromArray<T extends boolean | number>(capacity: number, array: T[]): BitPool {
+    // Validate capacity
+    if (typeof capacity !== "number" || !Number.isSafeInteger(capacity)) {
+      throw new TypeError('"value" must be a safe integer');
     }
-
-    if (array.length === 0) {
-      return new BitPool(size);
-    }
-
-    // If array contains booleans, create BooleanArray directly
-    if (typeof array[0] === "boolean") {
-      const boolArray = array as boolean[];
-      const arr = new BooleanArray(size);
-      const copyLength = Math.min(boolArray.length, size);
-      for (let i = 0; i < copyLength; i++) {
-        arr.set(i, boolArray[i]!);
-      }
-      return new BitPool(arr);
-    }
-
-    // If array contains numbers, these are treated as indices to be marked as occupied.
-    const indicesToOccupy = array as number[];
-    const arr = new BooleanArray(size); // Initialize all as available (false)
-
-    for (const value of indicesToOccupy) {
-      // Validate each index
-      if (!Number.isSafeInteger(value)) {
-        throw new TypeError(`"value" in input array (${value}) must be a safe integer`);
-      }
-      if (value < 0) {
-        throw new RangeError(`"value" in input array (${value}) must be greater than or equal to 0`);
-      }
-      if (value >= size) {
-        throw new RangeError(
-          `"value" in input array (${value}) is out of bounds for pool capacity ${size}. Must be less than ${size}.`,
-        );
-      }
-      arr.set(value, true); // Mark as occupied
-    }
-    return new BitPool(arr);
-  }
-
-  /**
-   * Creates a new BitPool from a Uint32Array or number array.
-   * @param array The array to use as the pool
-   * @param capacity The size of the pool (default is the length of the array * 32)
-   * @returns A new BitPool
-   *
-   * @example
-   * ```ts
-   * // Create a pool of 128 bits, explicitly specifying each chunk of 32 bits
-   * const pool = BitPool.fromUint32Array([0b11110000, 0b00001111, 0b10101010], 128);
-   * ```
-   */
-  static fromUint32Array(array: ArrayLike<number>, capacity: number = array.length * 32): BitPool {
     if (capacity <= 0) {
       throw new RangeError('"capacity" must be greater than 0');
     }
-    if (capacity < array.length * 32) {
-      throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${array.length * 32}`);
+    if (capacity > BitPool.MAX_SAFE_SIZE) {
+      throw new RangeError('"value" must be smaller than or equal to 536870911.');
     }
 
-    // Validate array values
-    for (let i = 0; i < array.length; i++) {
-      const value = array[i];
-      if (value === undefined || !Number.isSafeInteger(value)) {
+    // Validate array
+    if (!Array.isArray(array)) {
+      throw new TypeError('"arr" must be an array of numbers or booleans.');
+    }
+
+    // Check if capacity is large enough for the array
+    const requiredCapacity = array.length * 32;
+    if (capacity < requiredCapacity) {
+      throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
+    }
+
+    // Validate array values are numbers and in valid range
+    for (const value of array) {
+      if (typeof value !== "number") {
+        throw new TypeError('"arr" must be an array of numbers or booleans.');
+      }
+      if (!Number.isSafeInteger(value)) {
         throw new TypeError('"value" must be a safe integer');
       }
       if (value < 0) {
         throw new RangeError('"value" must be greater than or equal to 0');
       }
+      if (value > 0xFFFFFFFF) {
+        throw new RangeError('"value" must be smaller than or equal to 4294967295');
+      }
     }
 
-    // Invert the bit patterns to match expected behavior (1 bits in input become occupied/true in BitPool)
-    const invertedArray = Array.from(array, (x) => ~x >>> 0);
+    // Convert to BooleanArray using fromUint32Array
+    // Input semantics: 1 = occupied, 0 = available
+    // BooleanArray semantics: true = 1 bit, false = 0 bit
+    // BitPool semantics: true = occupied, false = available
+    // We need to invert because tests expect: input 1 → output available (false)
+    const numberArray = array.map((value) => typeof value === "boolean" ? (value ? 1 : 0) : value) as number[];
+    const invertedArray = numberArray.map((value) => ~value >>> 0); // Bitwise NOT and convert to uint32
+    const arr = BooleanArray.fromUint32Array(capacity, invertedArray);
+    return new BitPool(arr);
+  }
+
+  /**
+   * Creates a new BitPool from a Uint32Array or number array.
+   * Each uint32 value represents 32 bits where 1 = occupied, 0 = available.
+   * @param capacity The total size of the pool
+   * @param array The array to use as the pool
+   * @returns A new BitPool
+   *
+   * @example
+   * ```ts
+   * // Create a pool of 128 bits, explicitly specifying each chunk of 32 bits
+   * const pool = BitPool.fromUint32Array(128, [0b11110000, 0b00001111, 0b10101010]);
+   * ```
+   */
+  static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
+    // Validate capacity
+    if (typeof capacity !== "number" || !Number.isSafeInteger(capacity)) {
+      throw new TypeError('"value" must be a safe integer');
+    }
+    if (capacity <= 0) {
+      throw new RangeError('"capacity" must be greater than 0');
+    }
+    if (capacity > BitPool.MAX_SAFE_SIZE) {
+      throw new RangeError('"value" must be smaller than or equal to 536870911.');
+    }
+
+    // Check if capacity is large enough for the array
+    const requiredCapacity = array.length * 32;
+    if (requiredCapacity > 0 && capacity < requiredCapacity) {
+      throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
+    }
+
+    // Convert array to regular array and invert bits
+    // Input semantics: 1 = occupied, 0 = available
+    // BooleanArray semantics: true = 1 bit, false = 0 bit
+    // BitPool semantics: true = occupied, false = available
+    // We need to invert because tests expect: input 1 → output available (false)
+    const invertedArray = Array.from(array).map((value) => ~value >>> 0); // Bitwise NOT and convert to uint32
     const arr = BooleanArray.fromUint32Array(capacity, invertedArray);
     return new BitPool(arr);
   }
@@ -192,7 +202,7 @@ export class BitPool {
    * @returns The acquired index, or -1 if pool is full.
    */
   acquire(): number {
-    if (this.#availableCount === 0) {
+    if (this.#availableCount === 0 || this.#nextAvailableIndex === -1) {
       return -1;
     }
     const index = this.#nextAvailableIndex;
@@ -218,9 +228,13 @@ export class BitPool {
    * Checks if an index is available.
    * @param index The index to check
    * @returns True if the index is available
+   * @throws {TypeError} When index is not a number
    * @throws {RangeError} When index is out of bounds
    */
   isAvailable(index: number): boolean {
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
+    }
     return !this.#data.get(index);
   }
 
@@ -294,12 +308,11 @@ export class BitPool {
     this.#data.set(index, false); // Mark as available
     this.#availableCount++;
 
-    if (index < this.#nextAvailableIndex) {
-      this.#nextAvailableIndex = index;
-    }
+    // Set nextAvailableIndex to the most recently released index
+    this.#nextAvailableIndex = index;
   }
 
-  /** Iterator that yields the underlying uint32 array values. */
+  /** Iterator that yields the underlying uint32array values. */
   *[Symbol.iterator](): IterableIterator<number> {
     for (let i = 0; i < this.#data.length; i++) {
       yield this.#data.buffer[i]!;

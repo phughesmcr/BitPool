@@ -3,14 +3,53 @@
 
 import { BitPool } from "../src/BitPool.ts";
 
-// Constants for different pool sizes
+// Pool sizes
 const SMALL_POOL_SIZE = 32;
 const MEDIUM_POOL_SIZE = 1024;
 const LARGE_POOL_SIZE = 100000;
 
-// Constructor benchmarks
+// ============================================================================
+// Helper Utilities
+// ============================================================================
+
+/**
+ * Simple deterministic PRNG for reproducible benchmarks.
+ * LCG algorithm: x_n+1 = (a * x_n + c) mod m
+ */
+class SeededRandom {
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
+
+  next(): number {
+    this.seed = (this.seed * 1103515245 + 12345) & 0x7fffffff;
+    return this.seed / 0x7fffffff;
+  }
+
+  nextInt(max: number): number {
+    return Math.floor(this.next() * max);
+  }
+}
+
+function prefill(pool: BitPool, count: number): void {
+  for (let i = 0; i < count; i++) {
+    pool.acquire();
+  }
+}
+
+function prefillFraction(pool: BitPool, fraction: number): void {
+  const count = Math.floor(pool.size * fraction);
+  prefill(pool, count);
+}
+
+// ============================================================================
+// Constructor Benchmarks
+// ============================================================================
+
 Deno.bench({
-  name: "BitPool constructor - small pool (32 bits)",
+  name: "constructor - small (32)",
   group: "constructor",
   fn: () => {
     new BitPool(SMALL_POOL_SIZE);
@@ -18,7 +57,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "BitPool constructor - medium pool (1024 bits)",
+  name: "constructor - medium (1024)",
   group: "constructor",
   fn: () => {
     new BitPool(MEDIUM_POOL_SIZE);
@@ -26,16 +65,160 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "BitPool constructor - large pool (100000 bits)",
+  name: "constructor - large (100000)",
   group: "constructor",
   fn: () => {
     new BitPool(LARGE_POOL_SIZE);
   },
 });
 
-// Acquire benchmarks
+// ============================================================================
+// fromUint32Array Benchmarks
+// ============================================================================
+
 Deno.bench({
-  name: "acquire() - best case (first bit)",
+  name: "fromUint32Array - empty array (32)",
+  group: "from-uint32array",
+  fn: () => {
+    BitPool.fromUint32Array(SMALL_POOL_SIZE, []);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - empty array (1024)",
+  group: "from-uint32array",
+  fn: () => {
+    BitPool.fromUint32Array(MEDIUM_POOL_SIZE, []);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 0% occupied (1024)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0);
+    BitPool.fromUint32Array(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 50% alternating (1024)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xAAAAAAAA);
+    BitPool.fromUint32Array(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 100% occupied (1024)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xFFFFFFFF);
+    BitPool.fromUint32Array(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 0% occupied (100000)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(LARGE_POOL_SIZE / 32);
+    const arr = Array(words).fill(0);
+    BitPool.fromUint32Array(LARGE_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 50% alternating (100000)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(LARGE_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xAAAAAAAA);
+    BitPool.fromUint32Array(LARGE_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromUint32Array - 100% occupied (100000)",
+  group: "from-uint32array",
+  fn: () => {
+    const words = Math.ceil(LARGE_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xFFFFFFFF);
+    BitPool.fromUint32Array(LARGE_POOL_SIZE, arr);
+  },
+});
+
+// ============================================================================
+// fromArray Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "fromArray - empty array (32)",
+  group: "from-array",
+  fn: () => {
+    BitPool.fromArray(SMALL_POOL_SIZE, []);
+  },
+});
+
+Deno.bench({
+  name: "fromArray - 0% occupied (1024)",
+  group: "from-array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0);
+    BitPool.fromArray(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromArray - 50% alternating (1024)",
+  group: "from-array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xAAAAAAAA);
+    BitPool.fromArray(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromArray - 100% occupied (1024)",
+  group: "from-array",
+  fn: () => {
+    const words = Math.ceil(MEDIUM_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xFFFFFFFF);
+    BitPool.fromArray(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+Deno.bench({
+  name: "fromArray - 50% alternating (100000)",
+  group: "from-array",
+  fn: () => {
+    const words = Math.ceil(LARGE_POOL_SIZE / 32);
+    const arr = Array(words).fill(0xAAAAAAAA);
+    BitPool.fromArray(LARGE_POOL_SIZE, arr);
+  },
+});
+
+// ============================================================================
+// Acquire Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "acquire - empty pool (32)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - empty pool (1024)",
   group: "acquire",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
@@ -44,36 +227,110 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "acquire() - worst case (last bit)",
+  name: "acquire - empty pool (100000)",
   group: "acquire",
   fn: () => {
-    const pool = new BitPool(MEDIUM_POOL_SIZE);
-    // Fill all but the last bit
-    for (let i = 0; i < MEDIUM_POOL_SIZE - 1; i++) {
-      pool.acquire();
-    }
-    // Acquire the last bit
+    const pool = new BitPool(LARGE_POOL_SIZE);
     pool.acquire();
   },
 });
 
 Deno.bench({
-  name: "acquire() - random pattern (50% full)",
+  name: "acquire - 50% prefilled (32)",
   group: "acquire",
   fn: () => {
-    const pool = new BitPool(MEDIUM_POOL_SIZE);
-    // Fill half the pool
-    for (let i = 0; i < MEDIUM_POOL_SIZE / 2; i++) {
-      pool.acquire();
-    }
-    // Acquire one more bit
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.5);
     pool.acquire();
   },
 });
 
-// Release benchmarks
 Deno.bench({
-  name: "release() - single bit",
+  name: "acquire - 50% prefilled (1024)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 50% prefilled (100000)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 95% prefilled (32)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 95% prefilled (1024)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 95% prefilled (100000)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 99% prefilled (1024)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.99);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - 99% prefilled (100000)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.99);
+    pool.acquire();
+  },
+});
+
+Deno.bench({
+  name: "acquire - full pool (returns -1)",
+  group: "acquire",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    pool.acquire();
+  },
+});
+
+// ============================================================================
+// Release Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "release - typical index",
   group: "release",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
@@ -83,26 +340,52 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "release() - multiple bits",
+  name: "release - boundary index 0",
   group: "release",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
-    const bits: number[] = [];
-    // Acquire 10 bits
-    for (let i = 0; i < 10; i++) {
-      bits.push(pool.acquire());
-    }
-    // Release all bits
-    for (const bit of bits) {
-      pool.release(bit);
-    }
+    pool.acquire();
+    pool.release(0);
   },
 });
 
-// isOccupied benchmarks
 Deno.bench({
-  name: "isOccupied() - first bit",
-  group: "isOccupied",
+  name: "release - boundary index 31",
+  group: "release",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefill(pool, 32);
+    pool.release(31);
+  },
+});
+
+Deno.bench({
+  name: "release - boundary index 32",
+  group: "release",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefill(pool, 33);
+    pool.release(32);
+  },
+});
+
+Deno.bench({
+  name: "release - last index",
+  group: "release",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    pool.release(MEDIUM_POOL_SIZE - 1);
+  },
+});
+
+// ============================================================================
+// Query Benchmarks (isOccupied, isAvailable, findNextAvailable)
+// ============================================================================
+
+Deno.bench({
+  name: "isOccupied - first index",
+  group: "queries",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
     pool.isOccupied(0);
@@ -110,8 +393,17 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "isOccupied() - last bit",
-  group: "isOccupied",
+  name: "isOccupied - middle index",
+  group: "queries",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.isOccupied(Math.floor(MEDIUM_POOL_SIZE / 2));
+  },
+});
+
+Deno.bench({
+  name: "isOccupied - last index",
+  group: "queries",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
     pool.isOccupied(MEDIUM_POOL_SIZE - 1);
@@ -119,774 +411,116 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "isOccupied() - mixed state",
-  group: "isOccupied",
+  name: "isAvailable - first index",
+  group: "queries",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
-    // Acquire some bits
-    pool.acquire();
-    pool.acquire();
-    pool.acquire();
-    // Check middle bit
-    pool.isOccupied(MEDIUM_POOL_SIZE / 2);
+    pool.isAvailable(0);
   },
 });
 
-// Combined operations benchmark
 Deno.bench({
-  name: "Mixed operations - acquire/release/isOccupied",
-  group: "combined",
+  name: "isAvailable - middle index",
+  group: "queries",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
-    const bit1 = pool.acquire();
-    const bit2 = pool.acquire();
-    pool.isOccupied(bit1);
-    pool.release(bit1);
-    pool.isOccupied(bit2);
-    pool.acquire();
-  },
-});
-
-// Edge case benchmarks
-Deno.bench({
-  name: "Edge case - acquire when pool is full",
-  group: "edge-cases",
-  fn: () => {
-    const pool = new BitPool(SMALL_POOL_SIZE);
-    // Fill the pool completely
-    for (let i = 0; i < SMALL_POOL_SIZE; i++) {
-      pool.acquire();
-    }
-    // Try to acquire when full
-    pool.acquire();
+    pool.isAvailable(Math.floor(MEDIUM_POOL_SIZE / 2));
   },
 });
 
 Deno.bench({
-  name: "Edge case - release at boundary positions",
-  group: "edge-cases",
-  fn: () => {
-    const pool = new BitPool(64);
-    // Acquire bits sequentially first
-    const acquired: number[] = [];
-    for (let i = 0; i < 35; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Release boundary positions (0, 31, 32)
-    pool.release(0); // First bit
-    pool.release(31); // Last bit of first word
-    pool.release(32); // First bit of second word
-  },
-});
-
-Deno.bench({
-  name: "Edge case - rapid acquire/release cycles",
-  group: "edge-cases",
-  fn: () => {
-    const pool = new BitPool(SMALL_POOL_SIZE);
-    for (let i = 0; i < 10; i++) {
-      const bit = pool.acquire();
-      pool.release(bit);
-    }
-  },
-});
-
-Deno.bench({
-  name: "Edge case - fragmented pool operations",
-  group: "edge-cases",
+  name: "isAvailable - last index",
+  group: "queries",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
-    const bits: number[] = [];
-    // Create fragmentation by acquiring every other bit
-    for (let i = 0; i < 20; i += 2) {
-      bits.push(pool.acquire());
-    }
-    // Release every other acquired bit
-    for (let i = 0; i < bits.length; i += 2) {
-      pool.release(bits[i]!);
-    }
-    // Try to acquire in fragmented state
-    pool.acquire();
+    pool.isAvailable(MEDIUM_POOL_SIZE - 1);
   },
 });
 
 Deno.bench({
-  name: "Edge case - minimum size pool operations",
-  group: "edge-cases",
+  name: "findNextAvailable - empty pool",
+  group: "queries",
   fn: () => {
-    const pool = new BitPool(1);
-    pool.acquire();
-    pool.release(0);
-    pool.acquire();
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.findNextAvailable();
   },
 });
 
 Deno.bench({
-  name: "Edge case - word boundary operations",
-  group: "edge-cases",
+  name: "findNextAvailable - 50% prefilled",
+  group: "queries",
   fn: () => {
-    const pool = new BitPool(64); // 2 words
-    // Fill first word
-    for (let i = 0; i < 32; i++) {
-      pool.acquire();
-    }
-    // Check and operate across boundary
-    pool.isOccupied(31); // Last bit of first word
-    pool.isOccupied(32); // First bit of second word
-    pool.acquire();
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.findNextAvailable();
   },
 });
 
 Deno.bench({
-  name: "Edge case - release invalid positions",
-  group: "edge-cases",
+  name: "findNextAvailable - 95% prefilled",
+  group: "queries",
   fn: () => {
-    const pool = new BitPool(SMALL_POOL_SIZE);
-    // Try to release invalid positions - these should be handled gracefully
-    try {
-      pool.release(-1);
-    } catch { /* expected */ }
-    try {
-      pool.release(SMALL_POOL_SIZE);
-    } catch { /* expected */ }
-    try {
-      pool.release(SMALL_POOL_SIZE + 1);
-    } catch { /* expected */ }
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    pool.findNextAvailable();
   },
 });
 
-// fromArray benchmarks
 Deno.bench({
-  name: "BitPool.fromUint32Array - small array (1 word)",
-  group: "fromUint32Array",
+  name: "findNextAvailable - 99% prefilled",
+  group: "queries",
   fn: () => {
-    BitPool.fromUint32Array([0b11110000], 32);
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.99);
+    pool.findNextAvailable();
   },
 });
 
 Deno.bench({
-  name: "BitPool.fromUint32Array - medium array (4 words)",
-  group: "fromUint32Array",
+  name: "findNextAvailable - with loop=false",
+  group: "queries",
   fn: () => {
-    BitPool.fromUint32Array([0b11110000, 0b00001111, 0b10101010, 0b01010101], 128);
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.findNextAvailable(100, false);
   },
 });
 
 Deno.bench({
-  name: "BitPool.fromUint32Array - large array (32 words)",
-  group: "fromUint32Array",
+  name: "findNextAvailable - with loop=true",
+  group: "queries",
   fn: () => {
-    const arr = Array(32).fill(0b10101010);
-    BitPool.fromUint32Array(arr, 1024);
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.findNextAvailable(100, true);
   },
 });
 
+// ============================================================================
+// Bulk Operations (fill, clear, refresh, clone)
+// ============================================================================
+
 Deno.bench({
-  name: "BitPool.fromUint32Array - sparse array (mostly zeros)",
-  group: "fromUint32Array",
+  name: "fill - 1024",
+  group: "bulk",
   fn: () => {
-    const arr = Array(16).fill(0);
-    arr[0] = 0b00000001;
-    arr[15] = 0b10000000;
-    BitPool.fromUint32Array(arr, 512);
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.fill();
   },
 });
 
 Deno.bench({
-  name: "BitPool.fromUint32Array - dense array (mostly ones)",
-  group: "fromUint32Array",
+  name: "fill - 100000",
+  group: "bulk",
   fn: () => {
-    const arr = Array(16).fill(0xFFFFFFFF);
-    arr[0] = 0xFFFFFFFE;
-    arr[15] = 0x7FFFFFFF;
-    BitPool.fromUint32Array(arr, 512);
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.fill();
   },
 });
 
 Deno.bench({
-  name: "BitPool.fromUint32Array - alternating pattern",
-  group: "fromUint32Array",
-  fn: () => {
-    const arr = Array(8).fill(0).map((_, i) => i % 2 === 0 ? 0xAAAAAAAA : 0x55555555);
-    BitPool.fromUint32Array(arr, 256);
-  },
-});
-
-Deno.bench({
-  name: "BitPool.fromUint32Array - empty array with large capacity",
-  group: "fromUint32Array",
-  fn: () => {
-    BitPool.fromUint32Array([], 1000);
-  },
-});
-
-Deno.bench({
-  name: "BitPool.fromUint32Array - all bits set",
-  group: "fromUint32Array",
-  fn: () => {
-    const arr = Array(4).fill(0xFFFFFFFF);
-    BitPool.fromUint32Array(arr, 128);
-  },
-});
-
-Deno.bench({
-  name: "BitPool.fromUint32Array - capacity much larger than array",
-  group: "fromUint32Array",
-  fn: () => {
-    BitPool.fromUint32Array([0xAAAAAAAA], 1000);
-  },
-});
-
-Deno.bench({
-  name: "BitPool.fromArray - single bit set",
-  group: "fromArray",
-  fn: () => {
-    BitPool.fromArray([1], 32);
-  },
-});
-
-// refresh benchmarks
-Deno.bench({
-  name: "refresh - empty pool",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - fully occupied pool",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    for (let i = 0; i < 32; i++) {
-      pool.acquire();
-    }
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - partially occupied pool",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    for (let i = 0; i < 16; i++) {
-      pool.acquire();
-    }
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - with valid nextAvailableIndex",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    // Acquire first bit to make index 0 unavailable
-    pool.acquire();
-    // Now index 0 is used, so we can safely use index 1
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - after sparse releases",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    // Acquire all bits
-    for (let i = 0; i < 32; i++) {
-      pool.acquire();
-    }
-    // Release every third bit
-    for (let i = 0; i < 32; i += 3) {
-      pool.release(i);
-    }
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - after sequential releases",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(32);
-    // Acquire first half
-    for (let i = 0; i < 16; i++) {
-      pool.acquire();
-    }
-    // Release first quarter
-    for (let i = 0; i < 8; i++) {
-      pool.release(i);
-    }
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - across word boundaries",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(64); // 2 words
-    // Fill first word
-    for (let i = 0; i < 32; i++) {
-      pool.acquire();
-    }
-    // Release last bit of first word
-    pool.release(31);
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - with suggested index in occupied region",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(64);
-    // Fill first half
-    for (let i = 0; i < 32; i++) {
-      pool.acquire();
-    }
-    // Try to refresh with index in first word (which has available bits)
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - after complex pattern",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(64);
-    // Create checkerboard pattern
-    for (let i = 0; i < 64; i += 2) {
-      pool.acquire();
-    }
-    pool.refresh();
-  },
-});
-
-Deno.bench({
-  name: "refresh - minimum size pool",
-  group: "refresh",
-  fn: () => {
-    const pool = new BitPool(2); // Changed from 1 to 2 to avoid boundary issues
-    pool.acquire();
-    pool.release(0);
-    pool.refresh();
-  },
-});
-
-// Property getter benchmarks
-Deno.bench({
-  name: "size getter - small pool",
-  group: "property-getters",
-  fn: () => {
-    const pool = new BitPool(32);
-    pool.size;
-  },
-});
-
-Deno.bench({
-  name: "size getter - large pool",
-  group: "property-getters",
-  fn: () => {
-    const pool = new BitPool(100000);
-    pool.size;
-  },
-});
-
-Deno.bench({
-  name: "nextAvailableIndex getter - empty pool",
-  group: "property-getters",
-  fn: () => {
-    const pool = new BitPool(1024);
-    pool.nextAvailableIndex;
-  },
-});
-
-Deno.bench({
-  name: "nextAvailableIndex getter - partially filled",
-  group: "property-getters",
-  fn: () => {
-    const pool = new BitPool(1024);
-    for (let i = 0; i < 100; i++) {
-      pool.acquire();
-    }
-    pool.nextAvailableIndex;
-  },
-});
-
-// Very large pool benchmarks
-Deno.bench({
-  name: "Large pool - constructor (1M bits)",
-  group: "large-pools",
-  fn: () => {
-    new BitPool(1000000);
-  },
-});
-
-Deno.bench({
-  name: "Large pool - acquire first bit (1M bits)",
-  group: "large-pools",
-  fn: () => {
-    const pool = new BitPool(1000000);
-    pool.acquire();
-  },
-});
-
-Deno.bench({
-  name: "Large pool - acquire after many operations (1M bits)",
-  group: "large-pools",
-  fn: () => {
-    const pool = new BitPool(1000000);
-    // Fill first few chunks to force hierarchy traversal
-    for (let i = 0; i < 1000; i++) {
-      pool.acquire();
-    }
-    pool.acquire();
-  },
-});
-
-// Multi-level hierarchy stress tests
-Deno.bench({
-  name: "Multi-level hierarchy - deep hierarchy pool",
-  group: "hierarchy-stress",
-  fn: () => {
-    // Create pool large enough for multiple hierarchy levels
-    const pool = new BitPool(32768); // 1024 data words, 32 hierarchy words
-    pool.acquire();
-  },
-});
-
-Deno.bench({
-  name: "Multi-level hierarchy - acquire across boundaries",
-  group: "hierarchy-stress",
-  fn: () => {
-    const pool = new BitPool(32768);
-    // Fill first hierarchy chunk completely
-    for (let i = 0; i < 1024; i++) {
-      pool.acquire();
-    }
-    // Next acquire should traverse to next hierarchy chunk
-    pool.acquire();
-  },
-});
-
-Deno.bench({
-  name: "Multi-level hierarchy - fragmented state",
-  group: "hierarchy-stress",
-  fn: () => {
-    const pool = new BitPool(32768);
-    const acquired: number[] = [];
-    // Create fragmentation across multiple hierarchy chunks
-    for (let i = 0; i < 2000; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Release every 5th bit
-    for (let i = 0; i < acquired.length; i += 5) {
-      pool.release(acquired[i]!);
-    }
-    // Try to acquire in fragmented state
-    pool.acquire();
-  },
-});
-
-// Sequential vs random access patterns
-Deno.bench({
-  name: "Sequential access - acquire sequential bits",
-  group: "access-patterns",
-  fn: () => {
-    const pool = new BitPool(1024);
-    for (let i = 0; i < 100; i++) {
-      pool.acquire();
-    }
-  },
-});
-
-Deno.bench({
-  name: "Random access - isOccupied random positions",
-  group: "access-patterns",
-  fn: () => {
-    const pool = new BitPool(1024);
-    // Acquire some bits first
-    for (let i = 0; i < 100; i++) {
-      pool.acquire();
-    }
-    // Check random positions
-    for (let i = 0; i < 50; i++) {
-      const pos = Math.floor(Math.random() * 1024);
-      pool.isOccupied(pos);
-    }
-  },
-});
-
-Deno.bench({
-  name: "Scattered access - acquire/release scattered pattern",
-  group: "access-patterns",
-  fn: () => {
-    const pool = new BitPool(1024);
-    const positions = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900];
-    // Acquire scattered positions
-    for (const pos of positions) {
-      while (pool.acquire() !== pos && pool.acquire() !== -1) {
-        // Keep acquiring until we get the desired position or run out
-      }
-    }
-  },
-});
-
-// Error handling performance
-Deno.bench({
-  name: "Error handling - isOccupied out of bounds",
-  group: "error-handling",
-  fn: () => {
-    const pool = new BitPool(32);
-    try {
-      pool.isOccupied(100);
-    } catch {
-      // Expected error
-    }
-  },
-});
-
-Deno.bench({
-  name: "Error handling - release invalid positions",
-  group: "error-handling",
-  fn: () => {
-    const pool = new BitPool(32);
-    try {
-      pool.release(-1);
-    } catch { /* expected */ }
-    try {
-      pool.release(1000);
-    } catch { /* expected */ }
-  },
-});
-
-// Memory-intensive scenarios
-Deno.bench({
-  name: "Memory intensive - rapid pool creation/destruction",
-  group: "memory-intensive",
-  fn: () => {
-    for (let i = 0; i < 10; i++) {
-      const pool = new BitPool(1000);
-      pool.acquire();
-    }
-  },
-});
-
-Deno.bench({
-  name: "Memory intensive - large fromArray operation",
-  group: "memory-intensive",
-  fn: () => {
-    // Use boolean array instead of large numbers
-    const arr = Array(100).fill(false).map((_, i) => i % 2 === 0);
-    BitPool.fromArray(arr, 5000);
-  },
-});
-
-// Hierarchy boundary operations
-Deno.bench({
-  name: "Hierarchy boundary - operations at word boundaries",
-  group: "hierarchy-boundaries",
-  fn: () => {
-    const pool = new BitPool(128); // 4 words, spans boundaries
-    // Acquire bits right at 32-bit boundaries
-    const positions = [31, 32, 63, 64, 95, 96];
-    for (const pos of positions) {
-      while (pool.acquire() !== pos && pool.acquire() !== -1) {
-        // Keep acquiring until we get the desired position
-      }
-    }
-  },
-});
-
-Deno.bench({
-  name: "Hierarchy boundary - release at boundaries",
-  group: "hierarchy-boundaries",
-  fn: () => {
-    const pool = new BitPool(128);
-    // Acquire first bit of each word
-    const bits = [0, 32, 64, 96];
-    for (const bit of bits) {
-      while (pool.acquire() !== bit) {
-        // Keep acquiring until we get the desired bit
-      }
-    }
-    // Release all boundary bits
-    for (const bit of bits) {
-      pool.release(bit);
-    }
-  },
-});
-
-// Pool near-exhaustion scenarios
-Deno.bench({
-  name: "Near exhaustion - 95% full acquire",
-  group: "near-exhaustion",
-  fn: () => {
-    const pool = new BitPool(1000);
-    // Fill 95% of the pool
-    for (let i = 0; i < 950; i++) {
-      pool.acquire();
-    }
-    // Try to acquire more
-    pool.acquire();
-  },
-});
-
-Deno.bench({
-  name: "Near exhaustion - 99% full acquire",
-  group: "near-exhaustion",
-  fn: () => {
-    const pool = new BitPool(1000);
-    // Fill 99% of the pool
-    for (let i = 0; i < 990; i++) {
-      pool.acquire();
-    }
-    // Try to acquire more
-    pool.acquire();
-  },
-});
-
-Deno.bench({
-  name: "Near exhaustion - last bit operations",
-  group: "near-exhaustion",
-  fn: () => {
-    const pool = new BitPool(32);
-    // Fill all but last bit
-    for (let i = 0; i < 31; i++) {
-      pool.acquire();
-    }
-    // Acquire last bit
-    const lastBit = pool.acquire();
-    // Check if pool is full
-    pool.acquire(); // Should return -1
-    // Release and reacquire last bit
-    pool.release(lastBit);
-    pool.acquire();
-  },
-});
-
-// Rapid acquire/release at hierarchy boundaries
-Deno.bench({
-  name: "Rapid boundary operations - word boundary cycling",
-  group: "rapid-boundary",
-  fn: () => {
-    const pool = new BitPool(128);
-    // Rapidly acquire and release at word boundaries
-    for (let cycle = 0; cycle < 10; cycle++) {
-      const bit31 = 31;
-      const bit32 = 32;
-      // Acquire boundary bits
-      while (pool.acquire() !== bit31) { /* Keep trying */ }
-      while (pool.acquire() !== bit32) { /* Keep trying */ }
-      // Release them
-      pool.release(bit31);
-      pool.release(bit32);
-    }
-  },
-});
-
-Deno.bench({
-  name: "Rapid boundary operations - hierarchy word transitions",
-  group: "rapid-boundary",
-  fn: () => {
-    const pool = new BitPool(2048); // Multiple hierarchy words
-    const acquired: number[] = [];
-    // Fill first hierarchy chunk
-    for (let i = 0; i < 1024; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Rapidly release and reacquire to stress hierarchy updates
-    for (let i = 0; i < 100; i++) {
-      pool.release(acquired[i]!);
-      pool.acquire(); // Should reuse the released bit
-    }
-  },
-});
-
-// Fragmentation recovery benchmarks
-Deno.bench({
-  name: "Fragmentation recovery - heavy fragmentation cleanup",
-  group: "fragmentation-recovery",
-  fn: () => {
-    const pool = new BitPool(1024);
-    const acquired: number[] = [];
-    // Acquire all bits
-    for (let i = 0; i < 1024; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Create heavy fragmentation - release every 3rd bit
-    for (let i = 0; i < acquired.length; i += 3) {
-      pool.release(acquired[i]!);
-    }
-    // Force refresh to rebuild hierarchy
-    pool.refresh();
-    // Try to acquire in cleaned up state
-    for (let i = 0; i < 100; i++) {
-      if (pool.acquire() === -1) break;
-    }
-  },
-});
-
-Deno.bench({
-  name: "Fragmentation recovery - alternating pattern recovery",
-  group: "fragmentation-recovery",
-  fn: () => {
-    const pool = new BitPool(512);
-    const acquired: number[] = [];
-    // Acquire all bits
-    for (let i = 0; i < 512; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Create alternating pattern - release every other bit
-    for (let i = 0; i < acquired.length; i += 2) {
-      pool.release(acquired[i]!);
-    }
-    // Test performance of acquiring in alternating pattern
-    for (let i = 0; i < 50; i++) {
-      pool.acquire();
-    }
-  },
-});
-
-Deno.bench({
-  name: "Fragmentation recovery - sparse fragmentation handling",
-  group: "fragmentation-recovery",
-  fn: () => {
-    const pool = new BitPool(2048);
-    const acquired: number[] = [];
-    // Acquire many bits
-    for (let i = 0; i < 1500; i++) {
-      acquired.push(pool.acquire());
-    }
-    // Create sparse fragmentation - release every 10th bit
-    for (let i = 0; i < acquired.length; i += 10) {
-      pool.release(acquired[i]!);
-    }
-    // Test performance in sparse fragmented state
-    for (let i = 0; i < 50; i++) {
-      pool.acquire();
-    }
-  },
-});
-
-// clear() benchmarks
-Deno.bench({
-  name: "clear() - small pool",
-  group: "clear",
-  fn: () => {
-    const pool = new BitPool(SMALL_POOL_SIZE);
-    pool.clear();
-  },
-});
-
-Deno.bench({
-  name: "clear() - medium pool",
-  group: "clear",
+  name: "clear - 1024",
+  group: "bulk",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
     pool.clear();
@@ -894,8 +528,8 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "clear() - large pool",
-  group: "clear",
+  name: "clear - 100000",
+  group: "bulk",
   fn: () => {
     const pool = new BitPool(LARGE_POOL_SIZE);
     pool.clear();
@@ -903,14 +537,343 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "clear() - after modifications",
-  group: "clear",
+  name: "refresh - empty pool",
+  group: "bulk",
   fn: () => {
     const pool = new BitPool(MEDIUM_POOL_SIZE);
-    // Make modifications first
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - full pool",
+  group: "bulk",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - 50% prefilled",
+  group: "bulk",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "refresh - fragmented (every 3rd free)",
+  group: "bulk",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    for (let i = 0; i < MEDIUM_POOL_SIZE; i += 3) {
+      pool.release(i);
+    }
+    pool.refresh();
+  },
+});
+
+Deno.bench({
+  name: "clone - 1024",
+  group: "bulk",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.clone();
+  },
+});
+
+Deno.bench({
+  name: "clone - 100000",
+  group: "bulk",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.clone();
+  },
+});
+
+// ============================================================================
+// Iteration Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "availableIndices - 0% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "availableIndices - 50% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "availableIndices - 95% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices - 50% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices - 95% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices - 100% occupied (1024)",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "Symbol.iterator - 1024",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const word of pool) {
+      sum += word;
+    }
+  },
+});
+
+Deno.bench({
+  name: "Symbol.iterator - 100000",
+  group: "iteration",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const word of pool) {
+      sum += word;
+    }
+  },
+});
+
+// ============================================================================
+// Mixed Operations (realistic patterns)
+// ============================================================================
+
+Deno.bench({
+  name: "mixed - random ops (70% acquire, 30% release)",
+  group: "mixed",
+  fn: () => {
+    const pool = new BitPool(10000);
+    const rng = new SeededRandom(42);
+    const acquired: number[] = [];
+
+    for (let i = 0; i < 500; i++) {
+      if (rng.next() < 0.7 || acquired.length === 0) {
+        const bit = pool.acquire();
+        if (bit !== -1) {
+          acquired.push(bit);
+        }
+      } else {
+        const idx = rng.nextInt(acquired.length);
+        const bit = acquired[idx]!;
+        pool.release(bit);
+        acquired.splice(idx, 1);
+      }
+    }
+  },
+});
+
+Deno.bench({
+  name: "mixed - fragmentation pattern",
+  group: "mixed",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const acquired: number[] = [];
+
+    // Acquire many bits
+    for (let i = 0; i < 800; i++) {
+      acquired.push(pool.acquire());
+    }
+
+    // Release every 5th bit to create fragmentation
+    for (let i = 0; i < acquired.length; i += 5) {
+      pool.release(acquired[i]!);
+    }
+
+    // Measure acquisition in fragmented state
     for (let i = 0; i < 100; i++) {
       pool.acquire();
     }
-    pool.clear();
+  },
+});
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+Deno.bench({
+  name: "errors - isOccupied out of bounds",
+  group: "errors",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    try {
+      pool.isOccupied(SMALL_POOL_SIZE);
+    } catch {
+      // Expected error
+    }
+  },
+});
+
+Deno.bench({
+  name: "errors - isAvailable out of bounds",
+  group: "errors",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    try {
+      pool.isAvailable(-1);
+    } catch {
+      // Expected error
+    }
+  },
+});
+
+Deno.bench({
+  name: "errors - release invalid indices (no throw)",
+  group: "errors",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.release(-1);
+    pool.release(SMALL_POOL_SIZE);
+    pool.release(SMALL_POOL_SIZE + 100);
+  },
+});
+
+// ============================================================================
+// Property Getters
+// ============================================================================
+
+Deno.bench({
+  name: "props - size (32)",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    pool.size;
+  },
+});
+
+Deno.bench({
+  name: "props - size (1024)",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.size;
+  },
+});
+
+Deno.bench({
+  name: "props - availableCount",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.availableCount;
+  },
+});
+
+Deno.bench({
+  name: "props - occupiedCount",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.occupiedCount;
+  },
+});
+
+Deno.bench({
+  name: "props - isEmpty",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.isEmpty;
+  },
+});
+
+Deno.bench({
+  name: "props - isFull",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    pool.isFull;
+  },
+});
+
+Deno.bench({
+  name: "props - nextAvailableIndex (empty)",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.nextAvailableIndex;
+  },
+});
+
+Deno.bench({
+  name: "props - nextAvailableIndex (50% filled)",
+  group: "props",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.nextAvailableIndex;
   },
 });

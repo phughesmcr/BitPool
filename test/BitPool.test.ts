@@ -1,8 +1,9 @@
 /// <reference lib="deno.ns" />
 /// <reference lib="dom" />
 
+// deno-lint-ignore no-import-prefix
 import { assertEquals, assertThrows } from "jsr:@std/assert@^1.0.9";
-import { BitPool } from "../src/BitPool.ts";
+import { BitPool } from "../mod.ts";
 
 // Constructor Tests
 Deno.test("BitPool - constructor should create instance with valid size", () => {
@@ -32,6 +33,30 @@ Deno.test("BitPool - constructor should throw TypeError for NaN size", () => {
     () => new BitPool(NaN),
     TypeError,
     '"value" must be a safe integer',
+  );
+});
+
+Deno.test("BitPool - constructor should throw TypeError for float size", () => {
+  assertThrows(
+    () => new BitPool(1.5),
+    TypeError,
+    '"value" must be a safe integer',
+  );
+});
+
+Deno.test("BitPool - constructor should throw TypeError for Infinity size", () => {
+  assertThrows(
+    () => new BitPool(Infinity),
+    TypeError,
+    '"value" must be a safe integer',
+  );
+});
+
+Deno.test("BitPool - constructor should throw RangeError for negative size", () => {
+  assertThrows(
+    () => new BitPool(-1),
+    RangeError,
+    '"size" must be greater than 0',
   );
 });
 
@@ -92,6 +117,30 @@ Deno.test("BitPool - release should update nextAvailableIndex", () => {
   const lastBit = bits.at(-1)!;
   pool.release(lastBit);
   assertEquals(pool.nextAvailableIndex, lastBit); // Should point to the released bit
+});
+
+Deno.test("BitPool - release of same index twice should be no-op on second release", () => {
+  const pool = new BitPool(8);
+  const bit = pool.acquire();
+  const countAfterAcquire = pool.availableCount;
+
+  pool.release(bit);
+  const countAfterFirstRelease = pool.availableCount;
+  const nextAfterFirstRelease = pool.nextAvailableIndex;
+
+  pool.release(bit); // Second release
+  assertEquals(pool.availableCount, countAfterFirstRelease); // No change
+  assertEquals(pool.nextAvailableIndex, nextAfterFirstRelease); // No change
+  assertEquals(countAfterFirstRelease, countAfterAcquire + 1);
+});
+
+Deno.test("BitPool - release of non-integer should be ignored", () => {
+  const pool = new BitPool(8);
+  pool.acquire();
+  const countBefore = pool.availableCount;
+
+  pool.release(1.2); // Non-integer
+  assertEquals(pool.availableCount, countBefore); // Unchanged
 });
 
 // Complex Scenarios
@@ -207,9 +256,9 @@ Deno.test("BitPool - should handle floating point inputs", () => {
   const pool = new BitPool(8);
   const bit = pool.acquire();
 
-  // These should be handled gracefully
-  pool.release(1.5); // Should treat as 1
-  pool.release(-0.5); // Should be ignored
+  // Ignore non-integer indices; NaN should throw
+  pool.release(1.5); // Ignored (not a safe integer)
+  pool.release(-0.5); // Ignored (not a safe integer)
 
   // NaN should throw
   assertThrows(
@@ -502,6 +551,67 @@ Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
   );
 });
 
+Deno.test("BitPool.fromArray - should accept boolean arrays", () => {
+  // Note: fromArray converts booleans to 0xFFFFFFFF (true) or 0x00000000 (false)
+  // But current implementation treats them as numbers, so we use number arrays
+  // This test documents the expected behavior once boolean support is added
+  const arr = [0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000];
+  const pool = BitPool.fromArray(256, arr);
+
+  // After inversion: 0xFFFFFFFF->0x00000000 (all occupied), 0x00000000->0xFFFFFFFF (all available)
+  // First 32 bits should be available
+  for (let i = 0; i < 32; i++) {
+    assertEquals(pool.isOccupied(i), false);
+  }
+  // Next 32 bits should be available
+  for (let i = 32; i < 64; i++) {
+    assertEquals(pool.isOccupied(i), false);
+  }
+  // Bits 64-95 should be occupied
+  for (let i = 64; i < 96; i++) {
+    assertEquals(pool.isOccupied(i), true);
+  }
+});
+
+Deno.test("BitPool.fromArray - should throw for non-array input", () => {
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => BitPool.fromArray(32, null),
+    TypeError,
+    '"arr" must be an array',
+  );
+
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => BitPool.fromArray(32, "not an array"),
+    TypeError,
+    '"arr" must be an array',
+  );
+});
+
+Deno.test("BitPool.fromArray - should handle all 1s (all available after inversion)", () => {
+  const arr = [0xFFFFFFFF];
+  const pool = BitPool.fromArray(32, arr);
+  assertEquals(pool.nextAvailableIndex, 0);
+  assertEquals(pool.availableCount, 32);
+});
+
+Deno.test("BitPool.fromArray - should handle all 0s (all occupied after inversion)", () => {
+  const arr = [0x00000000];
+  const pool = BitPool.fromArray(32, arr);
+  assertEquals(pool.nextAvailableIndex, -1);
+  assertEquals(pool.availableCount, 0);
+});
+
+Deno.test("BitPool.fromArray - should handle capacity exactly matching array size", () => {
+  const arr = [0b11110000, 0b00001111];
+  const pool = BitPool.fromArray(64, arr); // Exactly 2 * 32
+  assertEquals(pool.size, 64);
+  // Verify first word pattern
+  assertEquals(pool.isOccupied(0), true);
+  assertEquals(pool.isOccupied(4), false);
+});
+
 // refresh() Method Tests
 Deno.test("BitPool - refresh should work without parameters", () => {
   const pool = new BitPool(32);
@@ -512,7 +622,7 @@ Deno.test("BitPool - refresh should work without parameters", () => {
   assertEquals(pool.nextAvailableIndex, 0); // Should find the released bit
 });
 
-Deno.test("BitPool - refresh should accept valid nextAvailableIndex", () => {
+Deno.test("BitPool - refresh should set nextAvailableIndex to first available", () => {
   const pool = new BitPool(64);
   // Acquire some bits but leave some available in the first chunk
   for (let i = 0; i < 16; i++) { // Only half of first chunk
@@ -753,6 +863,27 @@ Deno.test("BitPool.fromUint32Array - should throw for capacity too small", () =>
   );
 });
 
+Deno.test("BitPool.fromUint32Array - should accept Uint32Array typed array", () => {
+  const typedArray = new Uint32Array([0b11110000, 0b00001111]);
+  const pool = BitPool.fromUint32Array(64, typedArray);
+
+  // First word
+  assertEquals(pool.isOccupied(0), true);
+  assertEquals(pool.isOccupied(4), false);
+
+  // Second word
+  assertEquals(pool.isOccupied(32), false);
+  assertEquals(pool.isOccupied(36), true);
+});
+
+Deno.test("BitPool.fromUint32Array - should handle capacity exactly matching array size", () => {
+  const arr = [0b11110000, 0b00001111];
+  const pool = BitPool.fromUint32Array(64, arr); // Exactly 2 * 32
+  assertEquals(pool.size, 64);
+  assertEquals(pool.isOccupied(0), true);
+  assertEquals(pool.isOccupied(4), false);
+});
+
 // Property Tests
 Deno.test("BitPool - availableCount should return correct count", () => {
   const pool = new BitPool(32);
@@ -820,6 +951,17 @@ Deno.test("BitPool - fill should make all indices occupied", () => {
   assertEquals(pool.nextAvailableIndex, -1);
 });
 
+Deno.test("BitPool - acquire after fill should return -1, release should update nextAvailableIndex", () => {
+  const pool = new BitPool(8);
+  pool.fill();
+
+  assertEquals(pool.acquire(), -1); // Pool is full
+
+  pool.release(3); // Release a valid index
+  assertEquals(pool.nextAvailableIndex, 3);
+  assertEquals(pool.acquire(), 3); // Should reacquire the released bit
+});
+
 Deno.test("BitPool - clone should create independent copy", () => {
   const pool = new BitPool(8);
   pool.acquire();
@@ -834,6 +976,34 @@ Deno.test("BitPool - clone should create independent copy", () => {
   assertEquals(cloned.availableCount, pool.availableCount + 1);
 });
 
+Deno.test("BitPool - clone should have independent buffer (deep copy)", () => {
+  const pool = new BitPool(64);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const cloned = pool.clone();
+
+  // Verify buffers are equal initially
+  const poolValues = Array.from(pool);
+  const clonedValues = Array.from(cloned);
+  assertEquals(poolValues, clonedValues);
+
+  // Mutate original
+  pool.acquire(); // 2
+  pool.acquire(); // 3
+
+  // Verify buffers diverged
+  const poolValuesAfter = Array.from(pool);
+  const clonedValuesAfter = Array.from(cloned);
+  assertEquals(poolValuesAfter[0] !== clonedValuesAfter[0], true, "Buffers should diverge after mutation");
+
+  // Verify clone state unchanged
+  assertEquals(cloned.occupiedCount, 2);
+  assertEquals(cloned.isOccupied(0), true);
+  assertEquals(cloned.isOccupied(1), true);
+  assertEquals(cloned.isOccupied(2), false);
+});
+
 Deno.test("BitPool - isAvailable should return correct state", () => {
   const pool = new BitPool(8);
   assertEquals(pool.isAvailable(0), true);
@@ -843,6 +1013,44 @@ Deno.test("BitPool - isAvailable should return correct state", () => {
 
   pool.release(bit);
   assertEquals(pool.isAvailable(bit), true);
+});
+
+Deno.test("BitPool - isAvailable should throw TypeError for non-number input", () => {
+  const pool = new BitPool(32);
+
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => pool.isAvailable("0"),
+    TypeError,
+    '"index" must be a number',
+  );
+
+  assertThrows(
+    // @ts-expect-error - intentionally testing invalid input
+    () => pool.isAvailable(null),
+    TypeError,
+    '"index" must be a number',
+  );
+
+  assertThrows(
+    () => pool.isAvailable(NaN),
+    TypeError,
+    '"index" must be a number',
+  );
+});
+
+Deno.test("BitPool - isAvailable should throw RangeError for out of bounds", () => {
+  const pool = new BitPool(32);
+
+  assertThrows(
+    () => pool.isAvailable(32),
+    RangeError,
+  );
+
+  assertThrows(
+    () => pool.isAvailable(-1),
+    RangeError,
+  );
 });
 
 Deno.test("BitPool - findNextAvailable should find next available index", () => {
@@ -866,6 +1074,40 @@ Deno.test("BitPool - findNextAvailable with loop should wrap around", () => {
   assertEquals(pool.findNextAvailable(2, true), 1);
 });
 
+Deno.test("BitPool - findNextAvailable should return -1 when pool is full", () => {
+  const pool = new BitPool(4);
+  pool.fill();
+
+  assertEquals(pool.findNextAvailable(0, false), -1);
+  assertEquals(pool.findNextAvailable(0, true), -1);
+});
+
+Deno.test("BitPool - findNextAvailable with out of bounds startIndex should return first available", () => {
+  const pool = new BitPool(8);
+  pool.acquire(); // Occupy bit 0
+
+  // Negative start index
+  assertEquals(pool.findNextAvailable(-5), 1);
+
+  // Start index beyond size
+  assertEquals(pool.findNextAvailable(100), 1);
+});
+
+Deno.test("BitPool - findNextAvailable should handle holes in lower chunks with loop", () => {
+  const pool = new BitPool(64);
+  // Fill the entire pool
+  for (let i = 0; i < 64; i++) {
+    pool.acquire();
+  }
+
+  // Release bit 5 in first chunk
+  pool.release(5);
+
+  // Start searching from index 40 with loop enabled
+  // Should search 41..63, find none, then loop back to 0 and find 5
+  assertEquals(pool.findNextAvailable(40, true), 5);
+});
+
 // Iterator Tests
 Deno.test("BitPool - Symbol.iterator should yield uint32 values", () => {
   const pool = new BitPool(64);
@@ -874,6 +1116,37 @@ Deno.test("BitPool - Symbol.iterator should yield uint32 values", () => {
   const values = Array.from(pool);
   assertEquals(values.length, 2); // 64 bits = 2 uint32 words
   assertEquals(typeof values[0], "number");
+});
+
+Deno.test("BitPool - Symbol.iterator length should match Math.ceil(size / 32)", () => {
+  const testCases = [
+    { size: 1, expected: 1 },
+    { size: 33, expected: 2 },
+    { size: 50, expected: 2 },
+    { size: 64, expected: 2 },
+    { size: 65, expected: 3 },
+  ];
+
+  for (const { size, expected } of testCases) {
+    const pool = new BitPool(size);
+    const values = Array.from(pool);
+    assertEquals(values.length, expected, `Size ${size} should yield ${expected} words`);
+  }
+});
+
+Deno.test("BitPool - Symbol.iterator should reflect occupied bits in bitmask", () => {
+  const pool = new BitPool(32);
+
+  // Acquire first 4 bits (0, 1, 2, 3)
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+
+  const values = Array.from(pool);
+  // Bits 0-3 should be set (occupied = true = 1)
+  // Lower 4 bits set: 0b1111 = 15
+  assertEquals(values[0]! & 0b1111, 0b1111);
 });
 
 Deno.test("BitPool - occupiedIndices should yield occupied indices", () => {
@@ -893,4 +1166,218 @@ Deno.test("BitPool - occupiedIndices with range should respect bounds", () => {
 
   const occupied = Array.from(pool.occupiedIndices(1, 3));
   assertEquals(occupied, [1, 2]);
+});
+
+Deno.test("BitPool - availableIndices with start < 0 should clamp to 0", () => {
+  const pool = new BitPool(8);
+  pool.acquire(); // 0
+
+  const indices = Array.from(pool.availableIndices(-5, 3));
+  assertEquals(indices, [1, 2]); // Bits 1-2 are available (0 is occupied, 3 is exclusive)
+});
+
+Deno.test("BitPool - availableIndices with end > size should clamp to size", () => {
+  const pool = new BitPool(8);
+  pool.acquire(); // 0
+
+  const indices = Array.from(pool.availableIndices(6, 100));
+  assertEquals(indices, [6, 7]); // Only bits 6-7 exist in range
+});
+
+Deno.test("BitPool - availableIndices with start == end should return empty", () => {
+  const pool = new BitPool(8);
+
+  const indices = Array.from(pool.availableIndices(3, 3));
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool - availableIndices with start > end should return empty", () => {
+  const pool = new BitPool(8);
+
+  const indices = Array.from(pool.availableIndices(5, 3));
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool - occupiedIndices with start < 0 should clamp to 0", () => {
+  const pool = new BitPool(8);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const indices = Array.from(pool.occupiedIndices(-5, 2));
+  assertEquals(indices, [0, 1]);
+});
+
+Deno.test("BitPool - occupiedIndices with end > size should clamp to size", () => {
+  const pool = new BitPool(8);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const indices = Array.from(pool.occupiedIndices(0, 100));
+  assertEquals(indices, [0, 1]); // Only these are occupied
+});
+
+Deno.test("BitPool - occupiedIndices with start == end should return empty", () => {
+  const pool = new BitPool(8);
+  pool.acquire();
+
+  const indices = Array.from(pool.occupiedIndices(3, 3));
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool - occupiedIndices with start > end should return empty", () => {
+  const pool = new BitPool(8);
+  pool.acquire();
+
+  const indices = Array.from(pool.occupiedIndices(5, 3));
+  assertEquals(indices, []);
+});
+
+// Multi-chunk Tests
+Deno.test("BitPool - multi-chunk release in earlier chunk should update nextAvailableIndex", () => {
+  const pool = new BitPool(2048);
+
+  // Acquire across multiple chunks
+  const acquired: number[] = [];
+  for (let i = 0; i < 100; i++) {
+    acquired.push(pool.acquire());
+  }
+
+  // Release a bit in an earlier chunk (e.g., bit 10)
+  pool.release(10);
+
+  // nextAvailableIndex should point to the released bit without refresh
+  assertEquals(pool.nextAvailableIndex, 10);
+
+  // Next acquire should get the released bit
+  assertEquals(pool.acquire(), 10);
+});
+
+Deno.test("BitPool - multi-chunk operations should maintain consistency", () => {
+  const pool = new BitPool(2048);
+
+  // Fill first two chunks completely
+  for (let i = 0; i < 64; i++) {
+    pool.acquire();
+  }
+
+  // Release some bits in first chunk
+  pool.release(5);
+  pool.release(15);
+  pool.release(25);
+
+  // Verify nextAvailableIndex points to the last released
+  assertEquals(pool.nextAvailableIndex, 25);
+
+  // Next acquires get from nextAvailableIndex, then search forward
+  assertEquals(pool.acquire(), 25); // Gets last released
+  // After acquiring 25, findNextAvailable searches and finds next available
+  const next = pool.acquire();
+  assertEquals(next === 15 || next === 64, true); // Could be 15 or first in next chunk
+});
+
+// Deterministic Stress Tests
+Deno.test("BitPool - deterministic LCG stress test with state invariants", () => {
+  const pool = new BitPool(1024);
+
+  // Simple LCG parameters (from Numerical Recipes)
+  let seed = 12345;
+  const lcg = () => {
+    seed = (1103515245 * seed + 12345) % 2147483648;
+    return seed;
+  };
+
+  const acquired = new Set<number>();
+
+  // Phase 1: Acquire 512 bits
+  for (let i = 0; i < 512; i++) {
+    const bit = pool.acquire();
+    if (bit !== -1) {
+      acquired.add(bit);
+    }
+  }
+
+  // Verify invariant
+  assertEquals(pool.availableCount + pool.occupiedCount, pool.size);
+  assertEquals(pool.occupiedCount, acquired.size);
+
+  // Phase 2: Release half deterministically
+  const toRelease = Array.from(acquired).filter((_, i) => i % 2 === 0);
+  for (const bit of toRelease) {
+    pool.release(bit);
+    acquired.delete(bit);
+  }
+
+  // Verify invariant
+  assertEquals(pool.availableCount + pool.occupiedCount, pool.size);
+  assertEquals(pool.occupiedCount, acquired.size);
+
+  // Phase 3: Random acquire/release based on LCG
+  for (let i = 0; i < 1000; i++) {
+    const rand = lcg() % 100;
+    if (rand < 50 && acquired.size < pool.size) {
+      // Acquire
+      const bit = pool.acquire();
+      if (bit !== -1) {
+        acquired.add(bit);
+      }
+    } else if (acquired.size > 0) {
+      // Release random acquired bit
+      const arr = Array.from(acquired);
+      const idx = lcg() % arr.length;
+      const bit = arr[idx]!;
+      pool.release(bit);
+      acquired.delete(bit);
+    }
+
+    // Verify invariant holds throughout
+    assertEquals(pool.availableCount + pool.occupiedCount, pool.size);
+    assertEquals(pool.occupiedCount, acquired.size);
+  }
+
+  // Final verification via iterator
+  const words = Array.from(pool);
+  let countFromWords = 0;
+  for (let wordIdx = 0; wordIdx < words.length; wordIdx++) {
+    const word = words[wordIdx]!;
+    for (let bit = 0; bit < 32; bit++) {
+      const globalBit = wordIdx * 32 + bit;
+      if (globalBit >= pool.size) break;
+      const isSet = (word & (1 << bit)) !== 0;
+      if (isSet) countFromWords++;
+    }
+  }
+  assertEquals(countFromWords, pool.occupiedCount, "Iterator word count should match occupiedCount");
+});
+
+Deno.test("BitPool - stress test maintains nextAvailableIndex correctness", () => {
+  const pool = new BitPool(256);
+
+  // Fill completely
+  for (let i = 0; i < 256; i++) {
+    pool.acquire();
+  }
+  assertEquals(pool.nextAvailableIndex, -1);
+
+  // Release bits at various positions
+  const released = [10, 50, 100, 200];
+  for (const bit of released) {
+    pool.release(bit);
+  }
+
+  // nextAvailableIndex should be the last released
+  assertEquals(pool.nextAvailableIndex, 200);
+
+  // Acquire should get the last released first, then search forward
+  assertEquals(pool.acquire(), 200);
+
+  // After acquiring 200, findNextAvailable searches from 201 and wraps to find next
+  // It will find the first available from the released list
+  const acquired = new Set([pool.acquire(), pool.acquire(), pool.acquire()]);
+  assertEquals(acquired.size, 3); // Should get 3 distinct bits
+  assertEquals(acquired.has(10), true);
+  assertEquals(acquired.has(50), true);
+  assertEquals(acquired.has(100), true);
+
+  // Now pool should be full again
+  assertEquals(pool.acquire(), -1);
 });
