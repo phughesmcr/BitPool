@@ -578,14 +578,14 @@ Deno.test("BitPool.fromArray - should throw for non-array input", () => {
     // @ts-expect-error - intentionally testing invalid input
     () => BitPool.fromArray(32, null),
     TypeError,
-    '"arr" must be an array',
+    '"arr" must be an array-like of numbers.',
   );
 
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => BitPool.fromArray(32, "not an array"),
     TypeError,
-    '"arr" must be an array',
+    '"arr" must be an array-like of numbers.',
   );
 });
 
@@ -1380,4 +1380,316 @@ Deno.test("BitPool - stress test maintains nextAvailableIndex correctness", () =
 
   // Now pool should be full again
   assertEquals(pool.acquire(), -1);
+});
+
+// ============================================================================
+// Zero-Allocation Methods Tests
+// ============================================================================
+
+// forEachAvailable Tests
+Deno.test("BitPool.forEachAvailable - should iterate all available indices", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const indices: number[] = [];
+  pool.forEachAvailable((index) => indices.push(index));
+
+  assertEquals(indices.length, 30);
+  assertEquals(indices[0], 2);
+  assertEquals(indices[indices.length - 1], 31);
+});
+
+Deno.test("BitPool.forEachAvailable - should return this for chaining", () => {
+  const pool = new BitPool(8);
+  const result = pool.forEachAvailable(() => {});
+  assertEquals(result, pool);
+});
+
+Deno.test("BitPool.forEachAvailable - should respect range parameters", () => {
+  const pool = new BitPool(32);
+
+  const indices: number[] = [];
+  pool.forEachAvailable((index) => indices.push(index), 5, 10);
+
+  assertEquals(indices, [5, 6, 7, 8, 9]);
+});
+
+Deno.test("BitPool.forEachAvailable - should handle empty pool (all occupied)", () => {
+  const pool = new BitPool(8);
+  pool.fill();
+
+  const indices: number[] = [];
+  pool.forEachAvailable((index) => indices.push(index));
+
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool.forEachAvailable - should handle start >= end", () => {
+  const pool = new BitPool(32);
+
+  const indices: number[] = [];
+  pool.forEachAvailable((index) => indices.push(index), 10, 5);
+
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool.forEachAvailable - should match generator output", () => {
+  const pool = new BitPool(64);
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+
+  const generatorIndices = Array.from(pool.availableIndices());
+  const callbackIndices: number[] = [];
+  pool.forEachAvailable((index) => callbackIndices.push(index));
+
+  assertEquals(callbackIndices, generatorIndices);
+});
+
+// forEachOccupied Tests
+Deno.test("BitPool.forEachOccupied - should iterate all occupied indices", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+  pool.acquire(); // 2
+
+  const indices: number[] = [];
+  pool.forEachOccupied((index) => indices.push(index));
+
+  assertEquals(indices, [0, 1, 2]);
+});
+
+Deno.test("BitPool.forEachOccupied - should return this for chaining", () => {
+  const pool = new BitPool(8);
+  const result = pool.forEachOccupied(() => {});
+  assertEquals(result, pool);
+});
+
+Deno.test("BitPool.forEachOccupied - should respect range parameters", () => {
+  const pool = new BitPool(32);
+  for (let i = 0; i < 10; i++) {
+    pool.acquire();
+  }
+
+  const indices: number[] = [];
+  pool.forEachOccupied((index) => indices.push(index), 3, 8);
+
+  assertEquals(indices, [3, 4, 5, 6, 7]);
+});
+
+Deno.test("BitPool.forEachOccupied - should handle empty pool (none occupied)", () => {
+  const pool = new BitPool(8);
+
+  const indices: number[] = [];
+  pool.forEachOccupied((index) => indices.push(index));
+
+  assertEquals(indices, []);
+});
+
+Deno.test("BitPool.forEachOccupied - should match generator output", () => {
+  const pool = new BitPool(64);
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+
+  const generatorIndices = Array.from(pool.occupiedIndices());
+  const callbackIndices: number[] = [];
+  pool.forEachOccupied((index) => callbackIndices.push(index));
+
+  assertEquals(callbackIndices, generatorIndices);
+});
+
+// forEachChunk Tests
+Deno.test("BitPool.forEachChunk - should iterate all chunks", () => {
+  const pool = new BitPool(64);
+  pool.acquire(); // Set bit 0
+
+  const chunks: Array<{ value: number; index: number }> = [];
+  pool.forEachChunk((chunk, chunkIndex) => chunks.push({ value: chunk, index: chunkIndex }));
+
+  assertEquals(chunks.length, 2);
+  assertEquals(chunks[0]!.index, 0);
+  assertEquals(chunks[1]!.index, 1);
+  // First chunk should have bit 0 set (occupied)
+  assertEquals(chunks[0]!.value & 1, 1);
+});
+
+Deno.test("BitPool.forEachChunk - should return this for chaining", () => {
+  const pool = new BitPool(8);
+  const result = pool.forEachChunk(() => {});
+  assertEquals(result, pool);
+});
+
+Deno.test("BitPool.forEachChunk - should match Symbol.iterator output", () => {
+  const pool = new BitPool(96);
+  pool.acquire();
+  pool.acquire();
+
+  const iteratorValues = Array.from(pool);
+  const callbackValues: number[] = [];
+  pool.forEachChunk((chunk) => callbackValues.push(chunk));
+
+  assertEquals(callbackValues, iteratorValues);
+});
+
+// availableIndicesInto Tests
+Deno.test("BitPool.availableIndicesInto - should copy indices to buffer", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const buffer = new Uint32Array(32);
+  const count = pool.availableIndicesInto(buffer);
+
+  assertEquals(count, 30);
+  assertEquals(buffer[0], 2);
+  assertEquals(buffer[29], 31);
+});
+
+Deno.test("BitPool.availableIndicesInto - should respect range parameters", () => {
+  const pool = new BitPool(32);
+
+  const buffer = new Uint32Array(10);
+  const count = pool.availableIndicesInto(buffer, 5, 10);
+
+  assertEquals(count, 5);
+  assertEquals(Array.from(buffer.subarray(0, count)), [5, 6, 7, 8, 9]);
+});
+
+Deno.test("BitPool.availableIndicesInto - should return 0 for empty range", () => {
+  const pool = new BitPool(32);
+
+  const buffer = new Uint32Array(32);
+  const count = pool.availableIndicesInto(buffer, 10, 5);
+
+  assertEquals(count, 0);
+});
+
+Deno.test("BitPool.availableIndicesInto - should match generator output", () => {
+  const pool = new BitPool(64);
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+
+  const generatorIndices = Array.from(pool.availableIndices());
+  const buffer = new Uint32Array(64);
+  const count = pool.availableIndicesInto(buffer);
+
+  assertEquals(count, generatorIndices.length);
+  assertEquals(Array.from(buffer.subarray(0, count)), generatorIndices);
+});
+
+Deno.test("BitPool.availableIndicesInto - should handle full pool", () => {
+  const pool = new BitPool(32);
+  pool.fill();
+
+  const buffer = new Uint32Array(32);
+  const count = pool.availableIndicesInto(buffer);
+
+  assertEquals(count, 0);
+});
+
+// occupiedIndicesInto Tests
+Deno.test("BitPool.occupiedIndicesInto - should copy indices to buffer", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+  pool.acquire(); // 2
+
+  const buffer = new Uint32Array(32);
+  const count = pool.occupiedIndicesInto(buffer);
+
+  assertEquals(count, 3);
+  assertEquals(Array.from(buffer.subarray(0, count)), [0, 1, 2]);
+});
+
+Deno.test("BitPool.occupiedIndicesInto - should respect range parameters", () => {
+  const pool = new BitPool(32);
+  for (let i = 0; i < 10; i++) {
+    pool.acquire();
+  }
+
+  const buffer = new Uint32Array(10);
+  const count = pool.occupiedIndicesInto(buffer, 3, 8);
+
+  assertEquals(count, 5);
+  assertEquals(Array.from(buffer.subarray(0, count)), [3, 4, 5, 6, 7]);
+});
+
+Deno.test("BitPool.occupiedIndicesInto - should return 0 for empty pool", () => {
+  const pool = new BitPool(32);
+
+  const buffer = new Uint32Array(32);
+  const count = pool.occupiedIndicesInto(buffer);
+
+  assertEquals(count, 0);
+});
+
+Deno.test("BitPool.occupiedIndicesInto - should match generator output", () => {
+  const pool = new BitPool(64);
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+
+  const generatorIndices = Array.from(pool.occupiedIndices());
+  const buffer = new Uint32Array(64);
+  const count = pool.occupiedIndicesInto(buffer);
+
+  assertEquals(count, generatorIndices.length);
+  assertEquals(Array.from(buffer.subarray(0, count)), generatorIndices);
+});
+
+// Multi-chunk tests for zero-allocation methods
+Deno.test("BitPool.forEachAvailable - should work across chunk boundaries", () => {
+  const pool = new BitPool(100);
+  // Acquire some bits in different chunks
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+  for (let i = 0; i < 30; i++) pool.acquire(); // 2-31 (fill first chunk)
+  pool.acquire(); // 32 (second chunk)
+
+  const indices: number[] = [];
+  pool.forEachAvailable((index) => indices.push(index));
+
+  assertEquals(indices.length, 100 - 33);
+  assertEquals(indices[0], 33); // First available in second chunk
+});
+
+Deno.test("BitPool.availableIndicesInto - should work across chunk boundaries", () => {
+  const pool = new BitPool(100);
+  // Fill first chunk completely
+  for (let i = 0; i < 32; i++) pool.acquire();
+
+  const buffer = new Uint32Array(100);
+  const count = pool.availableIndicesInto(buffer);
+
+  assertEquals(count, 68); // 100 - 32
+  assertEquals(buffer[0], 32); // First available in second chunk
+});
+
+Deno.test("BitPool.forEachOccupied - should work across chunk boundaries", () => {
+  const pool = new BitPool(100);
+  pool.acquire(); // 0
+  // Skip to second chunk
+  for (let i = 1; i < 35; i++) pool.acquire();
+
+  const indices: number[] = [];
+  pool.forEachOccupied((index) => indices.push(index));
+
+  assertEquals(indices.length, 35);
+  assertEquals(indices[0], 0);
+  assertEquals(indices[32], 32); // First in second chunk
+});
+
+Deno.test("BitPool.occupiedIndicesInto - should work across chunk boundaries", () => {
+  const pool = new BitPool(100);
+  for (let i = 0; i < 40; i++) pool.acquire();
+
+  const buffer = new Uint32Array(100);
+  const count = pool.occupiedIndicesInto(buffer);
+
+  assertEquals(count, 40);
+  assertEquals(buffer[31], 31); // Last in first chunk
+  assertEquals(buffer[32], 32); // First in second chunk
 });

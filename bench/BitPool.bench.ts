@@ -877,3 +877,537 @@ Deno.bench({
     pool.nextAvailableIndex;
   },
 });
+
+// ============================================================================
+// Zero-Allocation Methods Benchmarks
+// ============================================================================
+
+// --- forEachAvailable vs availableIndices (generator) ---
+
+Deno.bench({
+  name: "forEachAvailable - 0% occupied (1024)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    let sum = 0;
+    pool.forEachAvailable((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 0% occupied (1024)",
+  group: "zero-alloc-available",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachAvailable - 50% occupied (1024)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachAvailable((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 50% occupied (1024)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachAvailable - 95% occupied (1024)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    pool.forEachAvailable((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 95% occupied (1024)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachAvailable - 50% occupied (100000)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachAvailable((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 50% occupied (100000)",
+  group: "zero-alloc-available",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.availableIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+// --- forEachOccupied vs occupiedIndices (generator) ---
+
+Deno.bench({
+  name: "forEachOccupied - 50% occupied (1024)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachOccupied((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 50% occupied (1024)",
+  group: "zero-alloc-occupied",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachOccupied - 95% occupied (1024)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    pool.forEachOccupied((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 95% occupied (1024)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.95);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachOccupied - 100% occupied (1024)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    let sum = 0;
+    pool.forEachOccupied((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 100% occupied (1024)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachOccupied - 50% occupied (100000)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachOccupied((idx) => {
+      sum += idx;
+    });
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 50% occupied (100000)",
+  group: "zero-alloc-occupied",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices()) {
+      sum += idx;
+    }
+  },
+});
+
+// --- forEachChunk vs Symbol.iterator (generator) ---
+
+Deno.bench({
+  name: "forEachChunk - 1024",
+  group: "zero-alloc-chunk",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachChunk((chunk) => {
+      sum += chunk;
+    });
+  },
+});
+
+Deno.bench({
+  name: "Symbol.iterator (gen) - 1024",
+  group: "zero-alloc-chunk",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const word of pool) {
+      sum += word;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachChunk - 100000",
+  group: "zero-alloc-chunk",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachChunk((chunk) => {
+      sum += chunk;
+    });
+  },
+});
+
+Deno.bench({
+  name: "Symbol.iterator (gen) - 100000",
+  group: "zero-alloc-chunk",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const word of pool) {
+      sum += word;
+    }
+  },
+});
+
+// --- availableIndicesInto vs availableIndices (generator) ---
+
+// Pre-allocate buffers outside benchmark for fair comparison
+const availableBuffer1024 = new Uint32Array(MEDIUM_POOL_SIZE);
+const availableBuffer100k = new Uint32Array(LARGE_POOL_SIZE);
+
+Deno.bench({
+  name: "availableIndicesInto - 0% occupied (1024)",
+  group: "zero-alloc-into-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.availableIndicesInto(availableBuffer1024);
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 0% occupied (1024)",
+  group: "zero-alloc-into-available",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const arr = Array.from(pool.availableIndices());
+    arr.length; // Prevent dead code elimination
+  },
+});
+
+Deno.bench({
+  name: "availableIndicesInto - 50% occupied (1024)",
+  group: "zero-alloc-into-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.availableIndicesInto(availableBuffer1024);
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 50% occupied (1024)",
+  group: "zero-alloc-into-available",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    const arr = Array.from(pool.availableIndices());
+    arr.length;
+  },
+});
+
+Deno.bench({
+  name: "availableIndicesInto - 50% occupied (100000)",
+  group: "zero-alloc-into-available",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.availableIndicesInto(availableBuffer100k);
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 50% occupied (100000)",
+  group: "zero-alloc-into-available",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    const arr = Array.from(pool.availableIndices());
+    arr.length;
+  },
+});
+
+// --- occupiedIndicesInto vs occupiedIndices (generator) ---
+
+const occupiedBuffer1024 = new Uint32Array(MEDIUM_POOL_SIZE);
+const occupiedBuffer100k = new Uint32Array(LARGE_POOL_SIZE);
+
+Deno.bench({
+  name: "occupiedIndicesInto - 50% occupied (1024)",
+  group: "zero-alloc-into-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.occupiedIndicesInto(occupiedBuffer1024);
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 50% occupied (1024)",
+  group: "zero-alloc-into-occupied",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    const arr = Array.from(pool.occupiedIndices());
+    arr.length;
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndicesInto - 100% occupied (1024)",
+  group: "zero-alloc-into-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    pool.occupiedIndicesInto(occupiedBuffer1024);
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 100% occupied (1024)",
+  group: "zero-alloc-into-occupied",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 1.0);
+    const arr = Array.from(pool.occupiedIndices());
+    arr.length;
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndicesInto - 50% occupied (100000)",
+  group: "zero-alloc-into-occupied",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.occupiedIndicesInto(occupiedBuffer100k);
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 50% occupied (100000)",
+  group: "zero-alloc-into-occupied",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    const arr = Array.from(pool.occupiedIndices());
+    arr.length;
+  },
+});
+
+// --- Range-limited iteration benchmarks ---
+
+Deno.bench({
+  name: "forEachAvailable - range [256, 768] (1024)",
+  group: "zero-alloc-range",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachAvailable(
+      (idx) => {
+        sum += idx;
+      },
+      256,
+      768,
+    );
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - range [256, 768] (1024)",
+  group: "zero-alloc-range",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.availableIndices(256, 768)) {
+      sum += idx;
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachOccupied - range [256, 768] (1024)",
+  group: "zero-alloc-range",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    pool.forEachOccupied(
+      (idx) => {
+        sum += idx;
+      },
+      256,
+      768,
+    );
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - range [256, 768] (1024)",
+  group: "zero-alloc-range",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (const idx of pool.occupiedIndices(256, 768)) {
+      sum += idx;
+    }
+  },
+});
+
+// --- Repeated iteration (showing GC pressure difference) ---
+
+Deno.bench({
+  name: "forEachAvailable - 1000 iterations (32)",
+  group: "zero-alloc-repeated",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (let i = 0; i < 1000; i++) {
+      pool.forEachAvailable((idx) => {
+        sum += idx;
+      });
+    }
+  },
+});
+
+Deno.bench({
+  name: "availableIndices (gen) - 1000 iterations (32)",
+  group: "zero-alloc-repeated",
+  baseline: true,
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (let i = 0; i < 1000; i++) {
+      for (const idx of pool.availableIndices()) {
+        sum += idx;
+      }
+    }
+  },
+});
+
+Deno.bench({
+  name: "forEachOccupied - 1000 iterations (32)",
+  group: "zero-alloc-repeated",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (let i = 0; i < 1000; i++) {
+      pool.forEachOccupied((idx) => {
+        sum += idx;
+      });
+    }
+  },
+});
+
+Deno.bench({
+  name: "occupiedIndices (gen) - 1000 iterations (32)",
+  group: "zero-alloc-repeated",
+  fn: () => {
+    const pool = new BitPool(SMALL_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    let sum = 0;
+    for (let i = 0; i < 1000; i++) {
+      for (const idx of pool.occupiedIndices()) {
+        sum += idx;
+      }
+    }
+  },
+});
