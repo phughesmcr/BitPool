@@ -407,10 +407,10 @@ Deno.test("BitPool - should recover from invalid operations", () => {
 
 // fromArray Static Method Tests
 Deno.test("BitPool.fromArray - should create BitPool from valid array", () => {
-  const arr = [0b11110000];
+  // Input: 0b00001111 means bits 0-3 are set (occupied), bits 4-7 are clear (available)
+  const arr = [0b00001111];
   const pool = BitPool.fromArray(256, arr);
 
-  // Check first byte (inverted)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(1), true);
   assertEquals(pool.isOccupied(2), true);
@@ -427,10 +427,12 @@ Deno.test("BitPool.fromArray - should handle empty array", () => {
 });
 
 Deno.test("BitPool.fromArray - should handle multiple integers", () => {
-  const arr = [0b11110000, 0b00001111];
+  // First integer: bits 0-3 occupied, bits 4-7 available
+  // Second integer: bits 0-3 available, bits 4-7 occupied (relative to word start)
+  const arr = [0b00001111, 0b11110000];
   const pool = BitPool.fromArray(512, arr);
 
-  // First integer
+  // First integer (1 = occupied)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(1), true);
   assertEquals(pool.isOccupied(2), true);
@@ -440,7 +442,7 @@ Deno.test("BitPool.fromArray - should handle multiple integers", () => {
   assertEquals(pool.isOccupied(6), false);
   assertEquals(pool.isOccupied(7), false);
 
-  // Second integer
+  // Second integer (bits 32+4 to 32+7 are occupied)
   assertEquals(pool.isOccupied(32), false);
   assertEquals(pool.isOccupied(33), false);
   assertEquals(pool.isOccupied(34), false);
@@ -464,9 +466,9 @@ Deno.test("BitPool.fromArray - should handle array with all bits set", () => {
   const arr = [0xFFFFFFFF];
   const pool = BitPool.fromArray(32, arr);
 
-  // All bits should be available (not occupied)
+  // All bits set in input = all occupied (1 = occupied)
   for (let i = 0; i < 32; i++) {
-    assertEquals(pool.isOccupied(i), false);
+    assertEquals(pool.isOccupied(i), true);
   }
 });
 
@@ -474,17 +476,18 @@ Deno.test("BitPool.fromArray - should handle array with no bits set", () => {
   const arr = [0x00000000];
   const pool = BitPool.fromArray(32, arr);
 
-  // All bits should be occupied
+  // No bits set in input = all available (0 = available)
   for (let i = 0; i < 32; i++) {
-    assertEquals(pool.isOccupied(i), true);
+    assertEquals(pool.isOccupied(i), false);
   }
 });
 
 Deno.test("BitPool.fromArray - should handle capacity larger than needed", () => {
-  const arr = [0b11110000];
+  // 0b00001111 = bits 0-3 occupied
+  const arr = [0b00001111];
   const pool = BitPool.fromArray(256, arr);
 
-  // Check first byte
+  // Check first byte (1 = occupied)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(1), true);
   assertEquals(pool.isOccupied(2), true);
@@ -494,12 +497,13 @@ Deno.test("BitPool.fromArray - should handle capacity larger than needed", () =>
   assertEquals(pool.isOccupied(6), false);
   assertEquals(pool.isOccupied(7), false);
 
-  // Extra capacity should be unoccupied
+  // Extra capacity should be available (unoccupied)
   assertEquals(pool.isOccupied(32), false);
 });
 
 Deno.test("BitPool.fromArray - should maintain correct nextAvailableIndex", () => {
-  const arr = [0b11110000, 0x00000000];
+  // 0b00001111 = bits 0-3 occupied, 0xFFFFFFFF = all bits 32-63 occupied
+  const arr = [0b00001111, 0xFFFFFFFF];
   const pool = BitPool.fromArray(64, arr);
   assertEquals(pool.nextAvailableIndex, 4); // First available bit after the occupied bits 0-3
 });
@@ -551,25 +555,24 @@ Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
   );
 });
 
-Deno.test("BitPool.fromArray - should accept boolean arrays", () => {
-  // Note: fromArray converts booleans to 0xFFFFFFFF (true) or 0x00000000 (false)
-  // But current implementation treats them as numbers, so we use number arrays
-  // This test documents the expected behavior once boolean support is added
+Deno.test("BitPool.fromArray - should accept numeric arrays", () => {
+  // 1 = occupied, 0 = available (no inversion)
   const arr = [0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000];
   const pool = BitPool.fromArray(256, arr);
 
-  // After inversion: 0xFFFFFFFF->0x00000000 (all occupied), 0x00000000->0xFFFFFFFF (all available)
-  // First 32 bits should be available
+  // 0xFFFFFFFF = all occupied
+  // First 32 bits should be occupied
   for (let i = 0; i < 32; i++) {
-    assertEquals(pool.isOccupied(i), false);
-  }
-  // Next 32 bits should be available
-  for (let i = 32; i < 64; i++) {
-    assertEquals(pool.isOccupied(i), false);
-  }
-  // Bits 64-95 should be occupied
-  for (let i = 64; i < 96; i++) {
     assertEquals(pool.isOccupied(i), true);
+  }
+  // Next 32 bits should be occupied
+  for (let i = 32; i < 64; i++) {
+    assertEquals(pool.isOccupied(i), true);
+  }
+  // 0x00000000 = all available
+  // Bits 64-95 should be available
+  for (let i = 64; i < 96; i++) {
+    assertEquals(pool.isOccupied(i), false);
   }
 });
 
@@ -589,25 +592,28 @@ Deno.test("BitPool.fromArray - should throw for non-array input", () => {
   );
 });
 
-Deno.test("BitPool.fromArray - should handle all 1s (all available after inversion)", () => {
+Deno.test("BitPool.fromArray - should handle all 1s (all occupied)", () => {
   const arr = [0xFFFFFFFF];
   const pool = BitPool.fromArray(32, arr);
-  assertEquals(pool.nextAvailableIndex, 0);
-  assertEquals(pool.availableCount, 32);
-});
-
-Deno.test("BitPool.fromArray - should handle all 0s (all occupied after inversion)", () => {
-  const arr = [0x00000000];
-  const pool = BitPool.fromArray(32, arr);
+  // All 1s = all occupied, so no available slots
   assertEquals(pool.nextAvailableIndex, -1);
   assertEquals(pool.availableCount, 0);
 });
 
+Deno.test("BitPool.fromArray - should handle all 0s (all available)", () => {
+  const arr = [0x00000000];
+  const pool = BitPool.fromArray(32, arr);
+  // All 0s = all available
+  assertEquals(pool.nextAvailableIndex, 0);
+  assertEquals(pool.availableCount, 32);
+});
+
 Deno.test("BitPool.fromArray - should handle capacity exactly matching array size", () => {
-  const arr = [0b11110000, 0b00001111];
+  // 0b00001111 = bits 0-3 occupied, 0b11110000 = bits 4-7 occupied (relative to word)
+  const arr = [0b00001111, 0b11110000];
   const pool = BitPool.fromArray(64, arr); // Exactly 2 * 32
   assertEquals(pool.size, 64);
-  // Verify first word pattern
+  // Verify first word pattern (1 = occupied)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(4), false);
 });
@@ -814,10 +820,11 @@ Deno.test("BitPool.availableIndices - with invalid range parameters", () => {
 
 // fromUint32Array Static Method Tests
 Deno.test("BitPool.fromUint32Array - should create BitPool from Uint32Array", () => {
-  const arr = [0b11110000];
+  // 0b00001111 = bits 0-3 occupied
+  const arr = [0b00001111];
   const pool = BitPool.fromUint32Array(32, arr);
 
-  // Check first byte (inverted)
+  // 1 = occupied, 0 = available (no inversion)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(1), true);
   assertEquals(pool.isOccupied(2), true);
@@ -835,14 +842,15 @@ Deno.test("BitPool.fromUint32Array - should handle empty array", () => {
 });
 
 Deno.test("BitPool.fromUint32Array - should handle multiple words", () => {
-  const arr = [0b11110000, 0b00001111];
+  // First word: bits 0-3 occupied, Second word: bits 4-7 occupied (relative to word)
+  const arr = [0b00001111, 0b11110000];
   const pool = BitPool.fromUint32Array(64, arr);
 
-  // First word
+  // First word (1 = occupied)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(4), false);
 
-  // Second word
+  // Second word (bits 32+4 to 32+7 occupied)
   assertEquals(pool.isOccupied(32), false);
   assertEquals(pool.isOccupied(36), true);
 });
@@ -864,20 +872,22 @@ Deno.test("BitPool.fromUint32Array - should throw for capacity too small", () =>
 });
 
 Deno.test("BitPool.fromUint32Array - should accept Uint32Array typed array", () => {
-  const typedArray = new Uint32Array([0b11110000, 0b00001111]);
+  // First word: bits 0-3 occupied, Second word: bits 4-7 occupied (relative to word)
+  const typedArray = new Uint32Array([0b00001111, 0b11110000]);
   const pool = BitPool.fromUint32Array(64, typedArray);
 
-  // First word
+  // First word (1 = occupied)
   assertEquals(pool.isOccupied(0), true);
   assertEquals(pool.isOccupied(4), false);
 
-  // Second word
+  // Second word (bits 32+4 to 32+7 occupied)
   assertEquals(pool.isOccupied(32), false);
   assertEquals(pool.isOccupied(36), true);
 });
 
 Deno.test("BitPool.fromUint32Array - should handle capacity exactly matching array size", () => {
-  const arr = [0b11110000, 0b00001111];
+  // 0b00001111 = bits 0-3 occupied
+  const arr = [0b00001111, 0b11110000];
   const pool = BitPool.fromUint32Array(64, arr); // Exactly 2 * 32
   assertEquals(pool.size, 64);
   assertEquals(pool.isOccupied(0), true);

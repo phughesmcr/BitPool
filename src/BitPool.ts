@@ -7,16 +7,6 @@
 
 import { BooleanArray } from "@phughesmcr/booleanarray";
 
-// Internal helpers to minimize allocations when inverting input words
-function invertNumbersToUint32(input: ArrayLike<number>): Uint32Array {
-  const out = new Uint32Array(input.length);
-  for (let i = 0; i < out.length; i++) {
-    // Bitwise NOT and convert to uint32
-    out[i] = ~input[i]! >>> 0;
-  }
-  return out;
-}
-
 /**
  * A high-performance bit pool for managing resource allocation.
  * Uses false = available, true = occupied for optimal performance.
@@ -35,7 +25,7 @@ export class BitPool {
    * @example
    * ```ts
    * // Create a pool of 32 bits with first 4 bits occupied
-   * const pool = BitPool.fromArray(32, [0b11110000]); // bits 0-3 occupied, 4-7 available
+   * const pool = BitPool.fromArray(32, [0b00001111]); // bits 0-3 occupied, 4-31 available
    * ```
    */
   static fromArray(capacity: number, array: ArrayLike<number>): BitPool {
@@ -84,8 +74,8 @@ export class BitPool {
     // Input semantics: 1 = occupied, 0 = available
     // BooleanArray semantics: true = 1 bit, false = 0 bit
     // BitPool semantics: true = occupied, false = available
-    const invertedArray = invertNumbersToUint32(array);
-    const arr = BooleanArray.fromUint32Array(capacity, invertedArray);
+    // These semantics are the same, so no inversion is needed
+    const arr = BooleanArray.fromUint32Array(capacity, array);
     return new BitPool(arr);
   }
 
@@ -99,7 +89,9 @@ export class BitPool {
    * @example
    * ```ts
    * // Create a pool of 128 bits, explicitly specifying each chunk of 32 bits
-   * const pool = BitPool.fromUint32Array(128, [0b11110000, 0b00001111, 0b10101010]);
+   * // Each uint32 represents 32 bits where 1 = occupied, 0 = available
+   * const pool = BitPool.fromUint32Array(128, [0b00001111, 0b11110000, 0b10101010, 0]);
+   * // bits 0-3 occupied, 4-31 available, bits 32-35 available, 36-39 occupied, etc.
    * ```
    */
   static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
@@ -120,9 +112,7 @@ export class BitPool {
       throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
     }
 
-    // Convert and invert without intermediate arrays to minimize allocations
-    const invertedArray = invertNumbersToUint32(array);
-    const arr = BooleanArray.fromUint32Array(capacity, invertedArray);
+    const arr = BooleanArray.fromUint32Array(capacity, array);
     return new BitPool(arr);
   }
 
