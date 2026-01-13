@@ -9,11 +9,25 @@ import { BooleanArray } from "@phughesmcr/booleanarray";
 
 /**
  * A high-performance bit pool for managing resource allocation.
- * Uses false = available, true = occupied for optimal performance.
+ *
+ * Internal representation: `false` = available, `true` = occupied.
+ *
+ * **Allocation behavior:**
+ * - Generator methods (`availableIndices`, `occupiedIndices`, `Symbol.iterator`) allocate iterator objects.
+ * - Methods named `forEach*` and `*Into` are truly zero-allocation.
+ * - `release()` uses LIFO semantics: the released index becomes `nextAvailableIndex` for cache-friendly reuse.
  */
 export class BitPool {
+  /** Returns the string tag for this class. */
+  get [Symbol.toStringTag](): string {
+    return "BitPool";
+  }
+
   /** The maximum safe size of the pool. */
   static readonly MAX_SAFE_SIZE = BooleanArray.MAX_SAFE_SIZE;
+
+  /** The maximum safe value for a Uint32Array. */
+  static readonly MAX_SAFE_VALUE = BooleanArray.ALL_BITS_TRUE;
 
   /**
    * Creates a new BitPool from an array of uint32 values representing bit patterns.
@@ -29,54 +43,7 @@ export class BitPool {
    * ```
    */
   static fromArray(capacity: number, array: ArrayLike<number>): BitPool {
-    // Validate capacity
-    if (typeof capacity !== "number" || !Number.isSafeInteger(capacity)) {
-      throw new TypeError('"value" must be a safe integer');
-    }
-    if (capacity <= 0) {
-      throw new RangeError('"capacity" must be greater than 0');
-    }
-    if (capacity > BitPool.MAX_SAFE_SIZE) {
-      throw new RangeError('"value" must be smaller than or equal to 536870911.');
-    }
-
-    // Validate array
-    // Accept any array-like numbers to reduce conversions
-    // Explicitly reject strings since they are array-like but not valid input
-    if (array == null || typeof array === "string" || typeof (array as ArrayLike<number>).length !== "number") {
-      throw new TypeError('"arr" must be an array-like of numbers.');
-    }
-
-    // Check if capacity is large enough for the array
-    const requiredCapacity = array.length * BooleanArray.BITS_PER_INT;
-    if (capacity < requiredCapacity) {
-      throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
-    }
-
-    // Validate array values are numbers and in valid range
-    for (let i = 0; i < array.length; i++) {
-      const value = array[i]!;
-      if (typeof value !== "number") {
-        throw new TypeError('"arr" must be an array of numbers.');
-      }
-      if (!Number.isSafeInteger(value)) {
-        throw new TypeError('"value" must be a safe integer');
-      }
-      if (value < 0) {
-        throw new RangeError('"value" must be greater than or equal to 0');
-      }
-      if (value > 0xFFFFFFFF) {
-        throw new RangeError('"value" must be smaller than or equal to 4294967295');
-      }
-    }
-
-    // Convert to BooleanArray using fromUint32Array
-    // Input semantics: 1 = occupied, 0 = available
-    // BooleanArray semantics: true = 1 bit, false = 0 bit
-    // BitPool semantics: true = occupied, false = available
-    // These semantics are the same, so no inversion is needed
-    const arr = BooleanArray.fromUint32Array(capacity, array);
-    return new BitPool(arr);
+    return BitPool.fromUint32Array(capacity, array);
   }
 
   /**
@@ -85,6 +52,9 @@ export class BitPool {
    * @param capacity The total size of the pool
    * @param array The array to use as the pool
    * @returns A new BitPool
+   * @throws {TypeError} If capacity is not a safe integer
+   * @throws {RangeError} If capacity is less than 1 or greater than MAX_SAFE_SIZE
+   * @throws {RangeError} If capacity is too small for the provided array
    *
    * @example
    * ```ts
@@ -95,23 +65,12 @@ export class BitPool {
    * ```
    */
   static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
-    // Validate capacity
-    if (typeof capacity !== "number" || !Number.isSafeInteger(capacity)) {
-      throw new TypeError('"value" must be a safe integer');
-    }
-    if (capacity <= 0) {
-      throw new RangeError('"capacity" must be greater than 0');
-    }
-    if (capacity > BitPool.MAX_SAFE_SIZE) {
-      throw new RangeError('"value" must be smaller than or equal to 536870911.');
-    }
-
     // Check if capacity is large enough for the array
+    capacity = BooleanArray.assertIsSafeSize(capacity);
     const requiredCapacity = array.length * BooleanArray.BITS_PER_INT;
     if (requiredCapacity > 0 && capacity < requiredCapacity) {
       throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
     }
-
     const arr = BooleanArray.fromUint32Array(capacity, array);
     return new BitPool(arr);
   }
@@ -134,18 +93,12 @@ export class BitPool {
   constructor(size: number);
   constructor(arrayOrSize: BooleanArray | number) {
     if (typeof arrayOrSize === "number") {
-      if (arrayOrSize < 1) { // other validations are handled by BooleanArray
-        throw new RangeError('"size" must be greater than 0');
-      }
       this.#data = new BooleanArray(arrayOrSize);
       this.#availableCount = this.#data.size;
     } else {
       this.#data = arrayOrSize;
-      // Use BooleanArray's optimized methods for counting and finding
-      // getTruthyCount() returns count of occupied (true) bits
       const occupiedCount = this.#data.getTruthyCount();
       this.#availableCount = this.#data.size - occupiedCount;
-      // indexOf(false) finds first available slot
       this.#nextAvailableIndex = this.#data.indexOf(false);
     }
   }
@@ -208,6 +161,29 @@ export class BitPool {
   }
 
   /**
+   * Returns a copy of the internal buffer as a Uint32Array.
+   * Each uint32 represents 32 bits where 1 = occupied, 0 = available.
+   *
+   * Use with {@link fromUint32Array} for serialization/deserialization.
+   *
+   * @returns A new Uint32Array containing the pool's bit data
+   * @note This method allocates a new Uint32Array.
+   *
+   * @example
+   * ```ts
+   * const pool = new BitPool(64);
+   * pool.acquire(); // 0
+   * pool.acquire(); // 1
+   * const serialized = pool.toUint32Array();
+   * // Later...
+   * const restored = BitPool.fromUint32Array(64, serialized);
+   * ```
+   */
+  toUint32Array(): Uint32Array {
+    return this.#data.buffer.slice();
+  }
+
+  /**
    * Checks if an index is available.
    * @param index The index to check
    * @returns True if the index is available
@@ -225,12 +201,10 @@ export class BitPool {
    * Checks if an index is occupied.
    * @param index The index to check
    * @returns True if the index is occupied
+   * @throws {TypeError} When index is not a safe integer
    * @throws {RangeError} When index is out of bounds
    */
   isOccupied(index: number): boolean {
-    if (typeof index !== "number" || isNaN(index)) {
-      throw new TypeError('"index" must be a number');
-    }
     return this.#data.get(index);
   }
 
@@ -277,9 +251,7 @@ export class BitPool {
       const mask = (upperMask & ~lowerMask) >>> 0;
       const availableMask = (~buffer[chunk]!) & mask;
       if (availableMask) {
-        const lsb = availableMask & -availableMask;
-        const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
-        return chunkStart + bit;
+        return chunkStart + BooleanArray.getLSBPosition(availableMask);
       }
       bitOffset = 0; // only applies to first chunk in this scan
     }
@@ -297,9 +269,7 @@ export class BitPool {
         const mask = upperMask >>> 0;
         const availableMask = (~buffer[c]!) & mask;
         if (availableMask) {
-          const lsb = availableMask & -availableMask;
-          const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
-          return chunkStart + bit;
+          return chunkStart + BooleanArray.getLSBPosition(availableMask);
         }
       }
     }
@@ -313,7 +283,13 @@ export class BitPool {
 
   /**
    * Releases an occupied index back to the pool.
+   *
+   * Uses LIFO semantics: the released index becomes `nextAvailableIndex`,
+   * so the next `acquire()` will return this index. This provides cache-friendly
+   * reuse patterns. Call `refresh()` after releasing to reset to lowest available.
+   *
    * @param index The index to release
+   * @throws {TypeError} If index is NaN
    */
   release(index: number): void {
     // Throw for NaN specifically as expected by tests
@@ -332,18 +308,80 @@ export class BitPool {
     this.#data.set(index, false); // Mark as available
     this.#availableCount++;
 
-    // Set nextAvailableIndex to the most recently released index
+    // LIFO: Set nextAvailableIndex to the most recently released index
     this.#nextAvailableIndex = index;
   }
 
-  /** Iterator that yields the underlying uint32array values. */
+  /**
+   * Releases multiple indices back to the pool.
+   *
+   * Invalid indices are silently ignored (same behavior as `release()`).
+   * After batch release, `nextAvailableIndex` will be the last valid released index.
+   *
+   * @param indices An iterable of indices to release
+   */
+  releaseAll(indices: Iterable<number>): void {
+    for (const index of indices) {
+      this.release(index);
+    }
+  }
+
+  /**
+   * Batch acquire multiple indices with all-or-nothing semantics.
+   *
+   * @param count The number of indices to acquire
+   * @returns An array of acquired indices
+   * @throws {TypeError} If count is not a non-negative integer
+   * @throws {RangeError} If there are fewer than `count` available indices
+   * @note This method allocates an array. For zero-allocation batch acquire, use {@link acquireNInto}.
+   */
+  acquireN(count: number): number[] {
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError('"count" must be a non-negative integer');
+    }
+    if (count > this.#availableCount) {
+      throw new RangeError(`Cannot acquire ${count} indices; only ${this.#availableCount} available`);
+    }
+    const result: number[] = [];
+    for (let i = 0; i < count; i++) {
+      result.push(this.acquire());
+    }
+    return result;
+  }
+
+  /**
+   * Zero-allocation batch acquire into a preallocated buffer.
+   *
+   * Fills as many indices as possible up to `out.length`. Does not throw
+   * if fewer indices are available than requested; caller should check return value.
+   *
+   * @param out Destination buffer to write acquired indices into
+   * @returns Number of indices actually acquired (may be less than `out.length`)
+   */
+  acquireNInto(out: Uint32Array): number {
+    let count = 0;
+    while (count < out.length && !this.isFull) {
+      out[count++] = this.acquire();
+    }
+    return count;
+  }
+
+  /**
+   * Iterator that yields the underlying uint32 chunk values.
+   * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachChunk}.
+   */
   *[Symbol.iterator](): IterableIterator<number> {
-    for (let i = 0; i < this.#data.length; i++) {
+    for (let i = 0; i < this.#data.chunkCount; i++) {
       yield this.#data.buffer[i]!;
     }
   }
 
-  /** Iterator that yields all available indices in the pool. */
+  /**
+   * Iterator that yields all available indices in the pool.
+   * @param startIndex Inclusive start index (default: 0)
+   * @param endIndex Exclusive end index (default: pool size)
+   * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachAvailable}.
+   */
   *availableIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
     const buffer = this.#data.buffer;
     const size = this.#data.size;
@@ -362,15 +400,19 @@ export class BitPool {
       const mask = (upperMask & ~lowerMask) >>> 0;
       let word = (~buffer[chunk]!) & mask;
       while (word) {
-        const lsb = word & -word;
-        const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
+        const bit = BooleanArray.getLSBPosition(word);
         yield chunkStart + bit;
         word &= word - 1;
       }
     }
   }
 
-  /** Iterator that yields all occupied indices in the pool. */
+  /**
+   * Iterator that yields all occupied indices in the pool.
+   * @param startIndex Inclusive start index (default: 0)
+   * @param endIndex Exclusive end index (default: pool size)
+   * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachOccupied}.
+   */
   *occupiedIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
     const buffer = this.#data.buffer;
     const size = this.#data.size;
@@ -389,8 +431,7 @@ export class BitPool {
       const mask = (upperMask & ~lowerMask) >>> 0;
       let word = buffer[chunk]! & mask;
       while (word) {
-        const lsb = word & -word;
-        const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
+        const bit = BooleanArray.getLSBPosition(word);
         yield chunkStart + bit;
         word &= word - 1;
       }
@@ -409,29 +450,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): this {
-    const buffer = this.#data.buffer;
-    const size = this.#data.size;
-    const actualStartIndex = Math.max(startIndex, 0);
-    const actualEndIndex = Math.min(endIndex, size);
-    if (actualStartIndex >= actualEndIndex) return this;
-    const startChunk = BooleanArray.getChunk(actualStartIndex);
-    const endChunk = BooleanArray.getChunk(actualEndIndex - 1);
-    for (let chunk = startChunk; chunk <= endChunk; chunk++) {
-      const chunkStart = chunk * BooleanArray.BITS_PER_INT;
-      const s = Math.max(actualStartIndex - chunkStart, 0);
-      const e = Math.min(actualEndIndex - chunkStart, BooleanArray.BITS_PER_INT);
-      if (s >= e) continue;
-      const lowerMask = s === 0 ? 0 : ((1 << s) - 1);
-      const upperMask = e === BooleanArray.BITS_PER_INT ? BooleanArray.ALL_BITS_TRUE : ((1 << e) - 1);
-      const mask = (upperMask & ~lowerMask) >>> 0;
-      let word = (~buffer[chunk]!) & mask;
-      while (word) {
-        const lsb = word & -word;
-        const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
-        callback(chunkStart + bit);
-        word &= word - 1;
-      }
-    }
+    const actualStart = Math.max(startIndex, 0);
+    const actualEnd = Math.min(endIndex, this.#data.size);
+    if (actualStart >= actualEnd) return this;
+    this.#data.forEachFalsy(callback, actualStart, actualEnd);
     return this;
   }
 
@@ -447,7 +469,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): this {
-    this.#data.forEachTruthy(callback, startIndex, endIndex);
+    const actualStart = Math.max(startIndex, 0);
+    const actualEnd = Math.min(endIndex, this.#data.size);
+    if (actualStart >= actualEnd) return this;
+    this.#data.forEachTruthy(callback, actualStart, actualEnd);
     return this;
   }
 
@@ -477,31 +502,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): number {
-    const buffer = this.#data.buffer;
-    const size = this.#data.size;
-    const actualStartIndex = Math.max(startIndex, 0);
-    const actualEndIndex = Math.min(endIndex, size);
-    if (actualStartIndex >= actualEndIndex) return 0;
-    const startChunk = BooleanArray.getChunk(actualStartIndex);
-    const endChunk = BooleanArray.getChunk(actualEndIndex - 1);
-    let count = 0;
-    for (let chunk = startChunk; chunk <= endChunk; chunk++) {
-      const chunkStart = chunk * BooleanArray.BITS_PER_INT;
-      const s = Math.max(actualStartIndex - chunkStart, 0);
-      const e = Math.min(actualEndIndex - chunkStart, BooleanArray.BITS_PER_INT);
-      if (s >= e) continue;
-      const lowerMask = s === 0 ? 0 : ((1 << s) - 1);
-      const upperMask = e === BooleanArray.BITS_PER_INT ? BooleanArray.ALL_BITS_TRUE : ((1 << e) - 1);
-      const mask = (upperMask & ~lowerMask) >>> 0;
-      let word = (~buffer[chunk]!) & mask;
-      while (word) {
-        const lsb = word & -word;
-        const bit = (BooleanArray.BITS_PER_INT - 1) - Math.clz32(lsb);
-        out[count++] = chunkStart + bit;
-        word &= word - 1;
-      }
-    }
-    return count;
+    const actualStart = Math.max(startIndex, 0);
+    const actualEnd = Math.min(endIndex, this.#data.size);
+    if (actualStart >= actualEnd) return 0;
+    return this.#data.falsyIndicesInto(out, actualStart, actualEnd);
   }
 
   /**
@@ -516,6 +520,119 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): number {
-    return this.#data.truthyIndicesInto(out, startIndex, endIndex);
+    const actualStart = Math.max(startIndex, 0);
+    const actualEnd = Math.min(endIndex, this.#data.size);
+    if (actualStart >= actualEnd) return 0;
+    return this.#data.truthyIndicesInto(out, actualStart, actualEnd);
+  }
+
+  /**
+   * Internal helper for binary set operations.
+   * @param other The other BitPool
+   * @param op Bitwise operation to apply (a, b) => result
+   * @param opName Name for error messages
+   */
+  #binaryOp(other: BitPool, op: (a: number, b: number) => number, opName: string): BitPool {
+    if (this.size !== other.size) {
+      throw new RangeError(`BitPool sizes must match for ${opName}`);
+    }
+    const result = new BitPool(this.size);
+    const resultBuffer = result.#data.buffer;
+    const thisBuffer = this.#data.buffer;
+    const otherBuffer = other.#data.buffer;
+    const chunkCount = this.#data.chunkCount;
+
+    let occupiedCount = 0;
+    for (let i = 0; i < chunkCount; i++) {
+      const value = op(thisBuffer[i]!, otherBuffer[i]!);
+      resultBuffer[i] = value;
+      occupiedCount += BooleanArray.popcount(value);
+    }
+
+    result.#availableCount = result.size - occupiedCount;
+    result.#nextAvailableIndex = result.#data.indexOf(false);
+    return result;
+  }
+
+  /**
+   * Returns a new BitPool containing only indices occupied in both pools (AND operation).
+   *
+   * @param other The other BitPool to intersect with
+   * @returns A new BitPool with the intersection
+   * @throws {RangeError} If the pools have different sizes
+   *
+   * @example
+   * ```ts
+   * const a = new BitPool(32);
+   * a.acquireN(4); // occupies 0, 1, 2, 3
+   * const b = new BitPool(32);
+   * b.acquireN(2); // occupies 0, 1
+   * const intersection = a.intersect(b); // occupies 0, 1
+   * ```
+   */
+  intersect(other: BitPool): BitPool {
+    return this.#binaryOp(other, (a, b) => a & b, "intersection");
+  }
+
+  /**
+   * Returns a new BitPool containing indices occupied in either pool (OR operation).
+   *
+   * @param other The other BitPool to union with
+   * @returns A new BitPool with the union
+   * @throws {RangeError} If the pools have different sizes
+   *
+   * @example
+   * ```ts
+   * const a = new BitPool(32);
+   * a.acquireN(2); // occupies 0, 1
+   * const b = new BitPool(32);
+   * b.acquire(); b.acquire(); b.acquire(); b.acquire();
+   * b.release(0); b.release(1); // occupies 2, 3
+   * const union = a.union(b); // occupies 0, 1, 2, 3
+   * ```
+   */
+  union(other: BitPool): BitPool {
+    return this.#binaryOp(other, (a, b) => a | b, "union");
+  }
+
+  /**
+   * Returns a new BitPool containing indices occupied in this pool but not in the other (AND NOT operation).
+   *
+   * @param other The other BitPool to subtract
+   * @returns A new BitPool with the difference
+   * @throws {RangeError} If the pools have different sizes
+   *
+   * @example
+   * ```ts
+   * const a = new BitPool(32);
+   * a.acquireN(4); // occupies 0, 1, 2, 3
+   * const b = new BitPool(32);
+   * b.acquireN(2); // occupies 0, 1
+   * const diff = a.difference(b); // occupies 2, 3 (in a but not in b)
+   * ```
+   */
+  difference(other: BitPool): BitPool {
+    return this.#binaryOp(other, (a, b) => a & ~b, "difference");
+  }
+
+  /**
+   * Returns a new BitPool containing indices occupied in exactly one of the pools (XOR operation).
+   *
+   * @param other The other BitPool
+   * @returns A new BitPool with the symmetric difference
+   * @throws {RangeError} If the pools have different sizes
+   *
+   * @example
+   * ```ts
+   * const a = new BitPool(32);
+   * a.acquireN(3); // occupies 0, 1, 2
+   * const b = new BitPool(32);
+   * b.acquire(); b.acquire(); b.acquire(); b.acquire();
+   * b.release(0); // occupies 1, 2, 3
+   * const symDiff = a.symmetricDifference(b); // occupies 0, 3 (in one but not both)
+   * ```
+   */
+  symmetricDifference(other: BitPool): BitPool {
+    return this.#binaryOp(other, (a, b) => a ^ b, "symmetric difference");
   }
 }

@@ -16,7 +16,7 @@ Deno.test("BitPool - constructor should throw RangeError for size < 1", () => {
   assertThrows(
     () => new BitPool(0),
     RangeError,
-    '"size" must be greater than 0',
+    '"size" must be greater than or equal to 1.',
   );
 });
 
@@ -24,7 +24,7 @@ Deno.test("BitPool - constructor should throw RangeError for size > 0xffffffff",
   assertThrows(
     () => new BitPool(0x100000000),
     RangeError,
-    '"value" must be smaller than or equal to 536870911.',
+    '"size" must be less than or equal to BooleanArray.MAX_SAFE_SIZE.',
   );
 });
 
@@ -32,7 +32,7 @@ Deno.test("BitPool - constructor should throw TypeError for NaN size", () => {
   assertThrows(
     () => new BitPool(NaN),
     TypeError,
-    '"value" must be a safe integer',
+    '"size" must be a safe integer.',
   );
 });
 
@@ -40,7 +40,7 @@ Deno.test("BitPool - constructor should throw TypeError for float size", () => {
   assertThrows(
     () => new BitPool(1.5),
     TypeError,
-    '"value" must be a safe integer',
+    '"size" must be a safe integer.',
   );
 });
 
@@ -48,7 +48,7 @@ Deno.test("BitPool - constructor should throw TypeError for Infinity size", () =
   assertThrows(
     () => new BitPool(Infinity),
     TypeError,
-    '"value" must be a safe integer',
+    '"size" must be a safe integer.',
   );
 });
 
@@ -56,7 +56,7 @@ Deno.test("BitPool - constructor should throw RangeError for negative size", () 
   assertThrows(
     () => new BitPool(-1),
     RangeError,
-    '"size" must be greater than 0',
+    '"size" must be greater than or equal to 1.',
   );
 });
 
@@ -508,24 +508,15 @@ Deno.test("BitPool.fromArray - should maintain correct nextAvailableIndex", () =
   assertEquals(pool.nextAvailableIndex, 4); // First available bit after the occupied bits 0-3
 });
 
-Deno.test("BitPool.fromArray - should throw for invalid array values", () => {
-  assertThrows(
-    () => BitPool.fromArray(32, [NaN]),
-    TypeError,
-    '"value" must be a safe integer',
-  );
+Deno.test("BitPool.fromArray - should handle edge case values without validation", () => {
+  // Since validation is deferred to BooleanArray, these values are silently coerced/truncated
+  // NaN becomes 0, negative numbers are bit-truncated
+  const pool1 = BitPool.fromArray(32, [NaN]);
+  assertEquals(pool1.size, 32);
+  assertEquals(pool1.availableCount, 32); // NaN coerces to 0, so all available
 
-  assertThrows(
-    () => BitPool.fromArray(32, [Infinity]),
-    TypeError,
-    '"value" must be a safe integer',
-  );
-
-  assertThrows(
-    () => BitPool.fromArray(32, [-1]),
-    RangeError,
-    '"value" must be greater than or equal to 0',
-  );
+  const pool2 = BitPool.fromArray(32, [0]);
+  assertEquals(pool2.availableCount, 32);
 });
 
 Deno.test("BitPool.fromArray - should handle maximum valid capacity", () => {
@@ -539,19 +530,19 @@ Deno.test("BitPool.fromArray - should throw for invalid capacity", () => {
   assertThrows(
     () => BitPool.fromArray(0, arr),
     RangeError,
-    '"capacity" must be greater than 0',
+    '"size" must be greater than or equal to 1.',
   );
 
   assertThrows(
     () => BitPool.fromArray(-1, arr),
     RangeError,
-    '"capacity" must be greater than 0',
+    '"size" must be greater than or equal to 1.',
   );
 
   assertThrows(
     () => BitPool.fromArray(0x100000000, arr),
     RangeError,
-    '"value" must be smaller than or equal to 536870911',
+    '"size" must be less than or equal to BooleanArray.MAX_SAFE_SIZE.',
   );
 });
 
@@ -577,18 +568,19 @@ Deno.test("BitPool.fromArray - should accept numeric arrays", () => {
 });
 
 Deno.test("BitPool.fromArray - should throw for non-array input", () => {
+  // Since validation is deferred to BooleanArray, errors come from there or JavaScript runtime
+  // null throws TypeError when trying to access .length
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => BitPool.fromArray(32, null),
     TypeError,
-    '"arr" must be an array-like of numbers.',
   );
 
+  // Strings have a .length but BooleanArray will throw for invalid array content
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => BitPool.fromArray(32, "not an array"),
-    TypeError,
-    '"arr" must be an array-like of numbers.',
+    RangeError,
   );
 });
 
@@ -669,20 +661,20 @@ Deno.test("BitPool - isOccupied should throw TypeError for non-number input", ()
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied("0"),
     TypeError,
-    '"index" must be a number',
+    '"index" must be a safe integer.',
   );
 
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied(null),
     TypeError,
-    '"index" must be a number',
+    '"index" must be a safe integer.',
   );
 
   assertThrows(
     () => pool.isOccupied(NaN),
     TypeError,
-    '"index" must be a number',
+    '"index" must be a safe integer.',
   );
 });
 
@@ -859,7 +851,7 @@ Deno.test("BitPool.fromUint32Array - should throw for invalid capacity", () => {
   assertThrows(
     () => BitPool.fromUint32Array(0, [0b11110000]),
     RangeError,
-    '"capacity" must be greater than 0',
+    '"size" must be greater than or equal to 1.',
   );
 });
 
@@ -1497,6 +1489,16 @@ Deno.test("BitPool.forEachOccupied - should handle empty pool (none occupied)", 
   assertEquals(indices, []);
 });
 
+Deno.test("BitPool.forEachOccupied - should handle start >= end", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // Occupy index 0
+
+  const indices: number[] = [];
+  pool.forEachOccupied((index) => indices.push(index), 10, 5);
+
+  assertEquals(indices, []);
+});
+
 Deno.test("BitPool.forEachOccupied - should match generator output", () => {
   const pool = new BitPool(64);
   pool.acquire();
@@ -1636,6 +1638,16 @@ Deno.test("BitPool.occupiedIndicesInto - should return 0 for empty pool", () => 
   assertEquals(count, 0);
 });
 
+Deno.test("BitPool.occupiedIndicesInto - should return 0 for empty range", () => {
+  const pool = new BitPool(32);
+  pool.acquire(); // Occupy index 0
+
+  const buffer = new Uint32Array(32);
+  const count = pool.occupiedIndicesInto(buffer, 10, 5);
+
+  assertEquals(count, 0);
+});
+
 Deno.test("BitPool.occupiedIndicesInto - should match generator output", () => {
   const pool = new BitPool(64);
   pool.acquire();
@@ -1702,4 +1714,446 @@ Deno.test("BitPool.occupiedIndicesInto - should work across chunk boundaries", (
   assertEquals(count, 40);
   assertEquals(buffer[31], 31); // Last in first chunk
   assertEquals(buffer[32], 32); // First in second chunk
+});
+
+// acquireN Tests
+Deno.test("BitPool.acquireN - should acquire exact count when available", () => {
+  const pool = new BitPool(100);
+  const indices = pool.acquireN(5);
+  assertEquals(indices.length, 5);
+  assertEquals(indices, [0, 1, 2, 3, 4]);
+  assertEquals(pool.availableCount, 95);
+});
+
+Deno.test("BitPool.acquireN - should throw RangeError when insufficient capacity", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5); // Acquire 5, leaving 5 available
+  assertThrows(
+    () => pool.acquireN(10),
+    RangeError,
+    "Cannot acquire 10 indices; only 5 available",
+  );
+});
+
+Deno.test("BitPool.acquireN - should return empty array for count=0", () => {
+  const pool = new BitPool(10);
+  const indices = pool.acquireN(0);
+  assertEquals(indices, []);
+  assertEquals(pool.availableCount, 10); // No change
+});
+
+Deno.test("BitPool.acquireN - should throw TypeError for non-integer count", () => {
+  const pool = new BitPool(10);
+  assertThrows(
+    () => pool.acquireN(1.5),
+    TypeError,
+    '"count" must be a non-negative integer',
+  );
+  assertThrows(
+    () => pool.acquireN(NaN),
+    TypeError,
+    '"count" must be a non-negative integer',
+  );
+});
+
+Deno.test("BitPool.acquireN - should throw TypeError for negative count", () => {
+  const pool = new BitPool(10);
+  assertThrows(
+    () => pool.acquireN(-1),
+    TypeError,
+    '"count" must be a non-negative integer',
+  );
+});
+
+Deno.test("BitPool.acquireN - should work with all-or-nothing semantics", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(8); // Acquire 8, leaving 2
+  // Attempting to acquire 3 should fail without partial allocation
+  const availableBefore = pool.availableCount;
+  assertThrows(() => pool.acquireN(3), RangeError);
+  assertEquals(pool.availableCount, availableBefore); // No change on failure
+});
+
+// acquireNInto Tests
+Deno.test("BitPool.acquireNInto - should fill buffer completely when enough slots", () => {
+  const pool = new BitPool(100);
+  const buffer = new Uint32Array(10);
+  const count = pool.acquireNInto(buffer);
+  assertEquals(count, 10);
+  assertEquals(pool.availableCount, 90);
+  assertEquals(Array.from(buffer), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+Deno.test("BitPool.acquireNInto - should partial fill when insufficient slots", () => {
+  const pool = new BitPool(5);
+  pool.acquireN(3); // Acquire 3, leaving 2
+  const buffer = new Uint32Array(10);
+  const count = pool.acquireNInto(buffer);
+  assertEquals(count, 2); // Only 2 were available
+  assertEquals(pool.availableCount, 0);
+  assertEquals(buffer[0], 3);
+  assertEquals(buffer[1], 4);
+});
+
+Deno.test("BitPool.acquireNInto - should return 0 for empty pool", () => {
+  const pool = new BitPool(5);
+  pool.fill(); // Mark all as occupied
+  const buffer = new Uint32Array(10);
+  const count = pool.acquireNInto(buffer);
+  assertEquals(count, 0);
+});
+
+Deno.test("BitPool.acquireNInto - should handle empty buffer", () => {
+  const pool = new BitPool(10);
+  const buffer = new Uint32Array(0);
+  const count = pool.acquireNInto(buffer);
+  assertEquals(count, 0);
+  assertEquals(pool.availableCount, 10); // No change
+});
+
+// releaseAll Tests
+Deno.test("BitPool.releaseAll - should release all provided indices", () => {
+  const pool = new BitPool(10);
+  const acquired = pool.acquireN(5);
+  assertEquals(pool.availableCount, 5);
+
+  pool.releaseAll(acquired);
+  assertEquals(pool.availableCount, 10);
+  for (const idx of acquired) {
+    assertEquals(pool.isAvailable(idx), true);
+  }
+});
+
+Deno.test("BitPool.releaseAll - should handle empty iterable", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5);
+  const before = pool.availableCount;
+  pool.releaseAll([]);
+  assertEquals(pool.availableCount, before);
+});
+
+Deno.test("BitPool.releaseAll - should ignore invalid indices", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5);
+  // Should not throw for out-of-bounds or already-available indices
+  pool.releaseAll([100, -1, 0, 1, 2, 3, 4, 999]);
+  assertEquals(pool.availableCount, 10);
+});
+
+Deno.test("BitPool.releaseAll - should work with Set", () => {
+  const pool = new BitPool(10);
+  const acquired = new Set(pool.acquireN(3));
+  pool.releaseAll(acquired);
+  assertEquals(pool.availableCount, 10);
+});
+
+Deno.test("BitPool.releaseAll - should work with generator", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5);
+
+  function* generateIndices() {
+    yield 0;
+    yield 1;
+    yield 2;
+  }
+
+  pool.releaseAll(generateIndices());
+  assertEquals(pool.availableCount, 8); // 5 + 3 released
+});
+
+Deno.test("BitPool.releaseAll - nextAvailableIndex should be last released", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5);
+  pool.releaseAll([1, 3, 4]); // Release in this order
+  // Due to LIFO behavior, nextAvailableIndex should be 4 (last released)
+  assertEquals(pool.nextAvailableIndex, 4);
+});
+
+// ============================================================================
+// Symbol.toStringTag Tests
+// ============================================================================
+
+Deno.test("BitPool - Symbol.toStringTag should return 'BitPool'", () => {
+  const pool = new BitPool(32);
+  assertEquals(Object.prototype.toString.call(pool), "[object BitPool]");
+});
+
+Deno.test("BitPool - Symbol.toStringTag getter should return string", () => {
+  const pool = new BitPool(32);
+  assertEquals(pool[Symbol.toStringTag], "BitPool");
+});
+
+// ============================================================================
+// toUint32Array Tests
+// ============================================================================
+
+Deno.test("BitPool.toUint32Array - should return copy of internal buffer", () => {
+  const pool = new BitPool(64);
+  pool.acquire(); // 0
+  pool.acquire(); // 1
+
+  const arr = pool.toUint32Array();
+  assertEquals(arr.length, 2); // 64 bits = 2 uint32s
+  assertEquals(arr[0], 0b11); // bits 0 and 1 set
+  assertEquals(arr[1], 0);
+});
+
+Deno.test("BitPool.toUint32Array - should be independent copy", () => {
+  const pool = new BitPool(32);
+  pool.acquire();
+
+  const arr1 = pool.toUint32Array();
+  pool.acquire();
+  const arr2 = pool.toUint32Array();
+
+  assertEquals(arr1[0], 0b1); // First copy unchanged
+  assertEquals(arr2[0], 0b11); // Second copy reflects new state
+});
+
+Deno.test("BitPool.toUint32Array - roundtrip with fromUint32Array", () => {
+  const pool = new BitPool(64);
+  pool.acquireN(10);
+  pool.release(3);
+  pool.release(7);
+
+  const serialized = pool.toUint32Array();
+  const restored = BitPool.fromUint32Array(64, serialized);
+
+  assertEquals(restored.size, pool.size);
+  assertEquals(restored.occupiedCount, pool.occupiedCount);
+  assertEquals(restored.availableCount, pool.availableCount);
+
+  // Verify each index matches
+  for (let i = 0; i < pool.size; i++) {
+    assertEquals(restored.isOccupied(i), pool.isOccupied(i), `Index ${i} mismatch`);
+  }
+});
+
+Deno.test("BitPool.toUint32Array - empty pool returns all zeros", () => {
+  const pool = new BitPool(64);
+  const arr = pool.toUint32Array();
+  assertEquals(arr[0], 0);
+  assertEquals(arr[1], 0);
+});
+
+Deno.test("BitPool.toUint32Array - full pool returns all ones", () => {
+  const pool = new BitPool(32);
+  pool.fill();
+  const arr = pool.toUint32Array();
+  assertEquals(arr[0], 0xFFFFFFFF);
+});
+
+// ============================================================================
+// Set Operations Tests
+// ============================================================================
+
+// intersect Tests
+Deno.test("BitPool.intersect - should return indices occupied in both pools", () => {
+  const a = new BitPool(32);
+  a.acquireN(4); // occupies 0, 1, 2, 3
+
+  const b = new BitPool(32);
+  b.acquireN(2); // occupies 0, 1
+
+  const result = a.intersect(b);
+  assertEquals(result.occupiedCount, 2);
+  assertEquals(result.isOccupied(0), true);
+  assertEquals(result.isOccupied(1), true);
+  assertEquals(result.isOccupied(2), false);
+  assertEquals(result.isOccupied(3), false);
+});
+
+Deno.test("BitPool.intersect - should throw for mismatched sizes", () => {
+  const a = new BitPool(32);
+  const b = new BitPool(64);
+  assertThrows(
+    () => a.intersect(b),
+    RangeError,
+    "BitPool sizes must match for intersection",
+  );
+});
+
+Deno.test("BitPool.intersect - empty intersection", () => {
+  const a = new BitPool(32);
+  a.acquireN(2); // 0, 1
+
+  const b = new BitPool(32);
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.release(0);
+  b.release(1); // 2, 3
+
+  const result = a.intersect(b);
+  assertEquals(result.occupiedCount, 0);
+});
+
+Deno.test("BitPool.intersect - multi-chunk pools", () => {
+  const a = new BitPool(64);
+  for (let i = 0; i < 40; i++) a.acquire();
+
+  const b = new BitPool(64);
+  for (let i = 0; i < 50; i++) b.acquire();
+
+  const result = a.intersect(b);
+  assertEquals(result.occupiedCount, 40); // min(40, 50) since they start from 0
+});
+
+// union Tests
+Deno.test("BitPool.union - should return indices occupied in either pool", () => {
+  const a = new BitPool(32);
+  a.acquireN(2); // 0, 1
+
+  const b = new BitPool(32);
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.release(0);
+  b.release(1); // 2, 3
+
+  const result = a.union(b);
+  assertEquals(result.occupiedCount, 4);
+  assertEquals(result.isOccupied(0), true);
+  assertEquals(result.isOccupied(1), true);
+  assertEquals(result.isOccupied(2), true);
+  assertEquals(result.isOccupied(3), true);
+});
+
+Deno.test("BitPool.union - should throw for mismatched sizes", () => {
+  const a = new BitPool(32);
+  const b = new BitPool(64);
+  assertThrows(
+    () => a.union(b),
+    RangeError,
+    "BitPool sizes must match for union",
+  );
+});
+
+Deno.test("BitPool.union - with empty pool", () => {
+  const a = new BitPool(32);
+  a.acquireN(5);
+
+  const b = new BitPool(32); // empty
+
+  const result = a.union(b);
+  assertEquals(result.occupiedCount, 5);
+});
+
+// difference Tests
+Deno.test("BitPool.difference - should return indices in this but not other", () => {
+  const a = new BitPool(32);
+  a.acquireN(4); // 0, 1, 2, 3
+
+  const b = new BitPool(32);
+  b.acquireN(2); // 0, 1
+
+  const result = a.difference(b);
+  assertEquals(result.occupiedCount, 2);
+  assertEquals(result.isOccupied(0), false);
+  assertEquals(result.isOccupied(1), false);
+  assertEquals(result.isOccupied(2), true);
+  assertEquals(result.isOccupied(3), true);
+});
+
+Deno.test("BitPool.difference - should throw for mismatched sizes", () => {
+  const a = new BitPool(32);
+  const b = new BitPool(64);
+  assertThrows(
+    () => a.difference(b),
+    RangeError,
+    "BitPool sizes must match for difference",
+  );
+});
+
+Deno.test("BitPool.difference - a - a = empty", () => {
+  const a = new BitPool(32);
+  a.acquireN(10);
+
+  const result = a.difference(a);
+  assertEquals(result.occupiedCount, 0);
+});
+
+Deno.test("BitPool.difference - a - empty = a", () => {
+  const a = new BitPool(32);
+  a.acquireN(5);
+
+  const b = new BitPool(32);
+
+  const result = a.difference(b);
+  assertEquals(result.occupiedCount, 5);
+});
+
+// symmetricDifference Tests
+Deno.test("BitPool.symmetricDifference - should return indices in exactly one pool", () => {
+  const a = new BitPool(32);
+  a.acquireN(3); // 0, 1, 2
+
+  const b = new BitPool(32);
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.acquire();
+  b.release(0); // 1, 2, 3
+
+  const result = a.symmetricDifference(b);
+  assertEquals(result.occupiedCount, 2);
+  assertEquals(result.isOccupied(0), true); // only in a
+  assertEquals(result.isOccupied(1), false); // in both
+  assertEquals(result.isOccupied(2), false); // in both
+  assertEquals(result.isOccupied(3), true); // only in b
+});
+
+Deno.test("BitPool.symmetricDifference - should throw for mismatched sizes", () => {
+  const a = new BitPool(32);
+  const b = new BitPool(64);
+  assertThrows(
+    () => a.symmetricDifference(b),
+    RangeError,
+    "BitPool sizes must match for symmetric difference",
+  );
+});
+
+Deno.test("BitPool.symmetricDifference - a XOR a = empty", () => {
+  const a = new BitPool(32);
+  a.acquireN(10);
+
+  const result = a.symmetricDifference(a);
+  assertEquals(result.occupiedCount, 0);
+});
+
+Deno.test("BitPool.symmetricDifference - a XOR empty = a", () => {
+  const a = new BitPool(32);
+  a.acquireN(5);
+
+  const b = new BitPool(32);
+
+  const result = a.symmetricDifference(b);
+  assertEquals(result.occupiedCount, 5);
+});
+
+// Set operations - multi-chunk stress test
+Deno.test("BitPool set operations - multi-chunk correctness", () => {
+  const a = new BitPool(128);
+  const b = new BitPool(128);
+
+  // Create specific patterns across chunks
+  for (let i = 0; i < 50; i++) a.acquire(); // a: 0-49
+  for (let i = 0; i < 70; i++) b.acquire(); // b: 0-69
+
+  const intersection = a.intersect(b);
+  assertEquals(intersection.occupiedCount, 50); // 0-49
+
+  const union = a.union(b);
+  assertEquals(union.occupiedCount, 70); // 0-69
+
+  const diff = a.difference(b);
+  assertEquals(diff.occupiedCount, 0); // a is subset of b
+
+  const diffReverse = b.difference(a);
+  assertEquals(diffReverse.occupiedCount, 20); // 50-69
+
+  const symDiff = a.symmetricDifference(b);
+  assertEquals(symDiff.occupiedCount, 20); // 50-69
 });

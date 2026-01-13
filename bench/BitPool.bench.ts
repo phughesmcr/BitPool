@@ -380,6 +380,118 @@ Deno.bench({
 });
 
 // ============================================================================
+// Batch Acquire/Release Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "acquireN - 10 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireN(10);
+  },
+});
+
+Deno.bench({
+  name: "acquireN - 100 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireN(100);
+  },
+});
+
+Deno.bench({
+  name: "acquireN - 500 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireN(500);
+  },
+});
+
+Deno.bench({
+  name: "acquireN - 1000 indices (100000)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.acquireN(1000);
+  },
+});
+
+// Pre-allocate buffers for acquireNInto
+const acquireBuffer10 = new Uint32Array(10);
+const acquireBuffer100 = new Uint32Array(100);
+const acquireBuffer500 = new Uint32Array(500);
+const acquireBuffer1000 = new Uint32Array(1000);
+
+Deno.bench({
+  name: "acquireNInto - 10 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireNInto(acquireBuffer10);
+  },
+});
+
+Deno.bench({
+  name: "acquireNInto - 100 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireNInto(acquireBuffer100);
+  },
+});
+
+Deno.bench({
+  name: "acquireNInto - 500 indices (1024)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.acquireNInto(acquireBuffer500);
+  },
+});
+
+Deno.bench({
+  name: "acquireNInto - 1000 indices (100000)",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    pool.acquireNInto(acquireBuffer1000);
+  },
+});
+
+Deno.bench({
+  name: "releaseAll - 10 indices",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const indices = pool.acquireN(10);
+    pool.releaseAll(indices);
+  },
+});
+
+Deno.bench({
+  name: "releaseAll - 100 indices",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const indices = pool.acquireN(100);
+    pool.releaseAll(indices);
+  },
+});
+
+Deno.bench({
+  name: "releaseAll - 500 indices",
+  group: "batch",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    const indices = pool.acquireN(500);
+    pool.releaseAll(indices);
+  },
+});
+
+// ============================================================================
 // Query Benchmarks (isOccupied, isAvailable, findNextAvailable)
 // ============================================================================
 
@@ -1409,5 +1521,171 @@ Deno.bench({
         sum += idx;
       }
     }
+  },
+});
+
+// ============================================================================
+// Serialization Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "toUint32Array - empty (1024)",
+  group: "serialization",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.toUint32Array();
+  },
+});
+
+Deno.bench({
+  name: "toUint32Array - 50% occupied (1024)",
+  group: "serialization",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.toUint32Array();
+  },
+});
+
+Deno.bench({
+  name: "toUint32Array - full (1024)",
+  group: "serialization",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    pool.fill();
+    pool.toUint32Array();
+  },
+});
+
+Deno.bench({
+  name: "toUint32Array - 50% occupied (100000)",
+  group: "serialization",
+  fn: () => {
+    const pool = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    pool.toUint32Array();
+  },
+});
+
+Deno.bench({
+  name: "roundtrip (toUint32Array + fromUint32Array) - 1024",
+  group: "serialization",
+  fn: () => {
+    const pool = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(pool, 0.5);
+    const arr = pool.toUint32Array();
+    BitPool.fromUint32Array(MEDIUM_POOL_SIZE, arr);
+  },
+});
+
+// ============================================================================
+// Set Operations Benchmarks
+// ============================================================================
+
+Deno.bench({
+  name: "intersect - 50% vs 50% (1024)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(MEDIUM_POOL_SIZE);
+    const b = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.intersect(b);
+  },
+});
+
+Deno.bench({
+  name: "intersect - 100% vs 50% (1024)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(MEDIUM_POOL_SIZE);
+    const b = new BitPool(MEDIUM_POOL_SIZE);
+    a.fill();
+    prefillFraction(b, 0.5);
+    a.intersect(b);
+  },
+});
+
+Deno.bench({
+  name: "intersect - 50% vs 50% (100000)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(LARGE_POOL_SIZE);
+    const b = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.intersect(b);
+  },
+});
+
+Deno.bench({
+  name: "union - 50% vs 50% (1024)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(MEDIUM_POOL_SIZE);
+    const b = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.union(b);
+  },
+});
+
+Deno.bench({
+  name: "union - 50% vs 50% (100000)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(LARGE_POOL_SIZE);
+    const b = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.union(b);
+  },
+});
+
+Deno.bench({
+  name: "difference - 50% vs 25% (1024)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(MEDIUM_POOL_SIZE);
+    const b = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.25);
+    a.difference(b);
+  },
+});
+
+Deno.bench({
+  name: "difference - 50% vs 25% (100000)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(LARGE_POOL_SIZE);
+    const b = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.25);
+    a.difference(b);
+  },
+});
+
+Deno.bench({
+  name: "symmetricDifference - 50% vs 50% (1024)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(MEDIUM_POOL_SIZE);
+    const b = new BitPool(MEDIUM_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.symmetricDifference(b);
+  },
+});
+
+Deno.bench({
+  name: "symmetricDifference - 50% vs 50% (100000)",
+  group: "set-ops",
+  fn: () => {
+    const a = new BitPool(LARGE_POOL_SIZE);
+    const b = new BitPool(LARGE_POOL_SIZE);
+    prefillFraction(a, 0.5);
+    prefillFraction(b, 0.5);
+    a.symmetricDifference(b);
   },
 });

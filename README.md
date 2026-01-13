@@ -13,9 +13,13 @@ A high-performance bit pool for managing resource allocation with efficient memo
 
 - **High Performance**: Optimized bitwise operations with minimal GC pressure
 - **Memory Efficient**: Uses `Uint32Array` backing for compact storage
+- **Zero-Allocation Options**: `forEach*` and `*Into` methods avoid allocations in hot paths
+- **Batch Operations**: `acquireN`, `acquireNInto`, and `releaseAll` for efficient bulk operations
+- **Set Operations**: `intersect`, `union`, `difference`, and `symmetricDifference` for combining pools
 - **Type Safe**: Full TypeScript support with comprehensive type definitions
 - **Iterator Support**: Built-in iterators for available and occupied indices
 - **Flexible Construction**: Create pools from scratch, arrays, or `Uint32Array`
+- **Serialization**: `toUint32Array()` and `fromUint32Array()` for save/restore workflows
 - **Large Pools**: Supports up to 536,870,911 indices (BitPool.MAX_SAFE_SIZE)
 
 ## Installation
@@ -85,19 +89,29 @@ Creates a new BitPool with the specified size.
 const pool = new BitPool(1000);
 ```
 
+### Static Properties
+
+#### `BitPool.MAX_SAFE_SIZE`
+
+The maximum safe size of the pool (536,870,911 indices).
+
+#### `BitPool.MAX_SAFE_VALUE`
+
+The maximum safe value for a Uint32Array chunk (0xFFFFFFFF).
+
 ### Static Methods
 
-#### `BitPool.fromArray(capacity: number, array: number[])`
+#### `BitPool.fromArray(capacity: number, array: ArrayLike<number>)`
 
 Creates a BitPool from an array of uint32 values representing bit patterns.  
 Each uint32 value represents 32 bits where `1 = occupied`, `0 = available`.
 
 ```ts
 // Create a pool with first 4 bits occupied
-const pool = BitPool.fromArray(32, [0b11110000]);
+const pool = BitPool.fromArray(32, [0b00001111]);
 ```
 
-#### `BitPool.fromUint32Array(capacity: number, array: Uint32Array)`
+#### `BitPool.fromUint32Array(capacity: number, array: ArrayLike<number>)`
 
 Creates a BitPool from a `Uint32Array` or number array.
 
@@ -174,12 +188,40 @@ if (index !== -1) {
 }
 ```
 
+#### `acquireN(count: number): number[]`
+
+Batch acquire multiple indices with all-or-nothing semantics. Throws if insufficient capacity.
+
+```ts
+const indices = pool.acquireN(10); // Acquire exactly 10 indices
+// Throws RangeError if fewer than 10 are available
+```
+
+#### `acquireNInto(out: Uint32Array): number`
+
+Zero-allocation batch acquire into a preallocated buffer. Returns count of indices actually acquired.
+
+```ts
+const buffer = new Uint32Array(100);
+const count = pool.acquireNInto(buffer);
+console.log(`Acquired ${count} indices`);
+```
+
 #### `release(index: number): void`
 
-Releases an occupied index back to the pool.
+Releases an occupied index back to the pool. Uses LIFO semantics (released index becomes next available).
 
 ```ts
 pool.release(index);
+```
+
+#### `releaseAll(indices: Iterable<number>): void`
+
+Batch release multiple indices.
+
+```ts
+pool.releaseAll([0, 1, 2, 3]); // Release multiple indices
+pool.releaseAll(acquiredSet);   // Works with Set, Array, or any Iterable
 ```
 
 #### `isAvailable(index: number): boolean`
@@ -243,6 +285,139 @@ Creates a copy of the pool.
 
 ```ts
 const cloned = pool.clone();
+```
+
+#### `toUint32Array(): Uint32Array`
+
+Returns a copy of the internal buffer as a Uint32Array. Use with `fromUint32Array` for serialization/deserialization.
+
+```ts
+const pool = new BitPool(64);
+pool.acquire(); // 0
+pool.acquire(); // 1
+const serialized = pool.toUint32Array();
+
+// Later...
+const restored = BitPool.fromUint32Array(64, serialized);
+```
+
+### Zero-Allocation Methods
+
+These methods avoid allocations in hot paths by using callbacks or preallocated buffers.
+
+#### `forEachAvailable(callback: (index: number) => void, startIndex?: number, endIndex?: number): this`
+
+Zero-allocation iteration over available indices via callback.
+
+```ts
+pool.forEachAvailable((index) => {
+  console.log(`Index ${index} is available`);
+});
+
+// With range
+pool.forEachAvailable((index) => {
+  console.log(`Index ${index} is available`);
+}, 100, 200);
+```
+
+#### `forEachOccupied(callback: (index: number) => void, startIndex?: number, endIndex?: number): this`
+
+Zero-allocation iteration over occupied indices via callback.
+
+```ts
+pool.forEachOccupied((index) => {
+  console.log(`Index ${index} is occupied`);
+});
+```
+
+#### `forEachChunk(callback: (chunk: number, chunkIndex: number) => void): this`
+
+Zero-allocation iteration over raw uint32 chunk values.
+
+```ts
+pool.forEachChunk((chunk, i) => {
+  console.log(`Chunk ${i}: ${chunk.toString(2)}`);
+});
+```
+
+#### `availableIndicesInto(out: Uint32Array, startIndex?: number, endIndex?: number): number`
+
+Copy available indices into a preallocated buffer. Returns number of indices written.
+
+```ts
+const buffer = new Uint32Array(pool.availableCount);
+const count = pool.availableIndicesInto(buffer);
+```
+
+#### `occupiedIndicesInto(out: Uint32Array, startIndex?: number, endIndex?: number): number`
+
+Copy occupied indices into a preallocated buffer. Returns number of indices written.
+
+```ts
+const buffer = new Uint32Array(pool.occupiedCount);
+const count = pool.occupiedIndicesInto(buffer);
+```
+
+### Set Operations
+
+Binary set operations for combining BitPools. All require pools of equal size.
+
+#### `intersect(other: BitPool): BitPool`
+
+Returns a new BitPool containing only indices occupied in **both** pools (AND operation).
+
+```ts
+const a = new BitPool(32);
+a.acquireN(4); // occupies 0, 1, 2, 3
+
+const b = new BitPool(32);
+b.acquireN(2); // occupies 0, 1
+
+const intersection = a.intersect(b); // occupies 0, 1
+```
+
+#### `union(other: BitPool): BitPool`
+
+Returns a new BitPool containing indices occupied in **either** pool (OR operation).
+
+```ts
+const a = new BitPool(32);
+a.acquireN(2); // occupies 0, 1
+
+const b = new BitPool(32);
+b.acquire(); b.acquire(); b.acquire(); b.acquire();
+b.release(0); b.release(1); // occupies 2, 3
+
+const combined = a.union(b); // occupies 0, 1, 2, 3
+```
+
+#### `difference(other: BitPool): BitPool`
+
+Returns a new BitPool containing indices occupied in this pool but **not** in the other (AND NOT operation).
+
+```ts
+const a = new BitPool(32);
+a.acquireN(4); // occupies 0, 1, 2, 3
+
+const b = new BitPool(32);
+b.acquireN(2); // occupies 0, 1
+
+const diff = a.difference(b); // occupies 2, 3 (in a but not in b)
+```
+
+#### `symmetricDifference(other: BitPool): BitPool`
+
+Returns a new BitPool containing indices occupied in **exactly one** of the pools (XOR operation).
+
+```ts
+const a = new BitPool(32);
+a.acquireN(3); // occupies 0, 1, 2
+
+const b = new BitPool(32);
+b.acquire(); b.acquire(); b.acquire(); b.acquire();
+b.release(0); // occupies 1, 2, 3
+
+const symDiff = a.symmetricDifference(b); // occupies 0, 3 (in one but not both)
 ```
 
 ### Iterators
@@ -347,13 +522,32 @@ function releaseConnection(connId: number): void {
 }
 ```
 
+### Serialization / Persistence
+
+```ts
+const pool = new BitPool(1000);
+
+// Use the pool...
+pool.acquireN(50);
+
+// Save state
+const state = pool.toUint32Array();
+localStorage.setItem("poolState", JSON.stringify(Array.from(state)));
+
+// Restore state
+const saved = JSON.parse(localStorage.getItem("poolState")!);
+const restored = BitPool.fromUint32Array(1000, new Uint32Array(saved));
+```
+
 ## Performance
 
 BitPool is designed for high-performance scenarios with minimal GC pressure:
 
 - Backed by `Uint32Array` for efficient memory usage
 - Optimized bitwise operations for fast lookups
-- Zero-allocation iterators where possible
+- **Zero-allocation methods**: `forEachAvailable`, `forEachOccupied`, `forEachChunk`, `availableIndicesInto`, `occupiedIndicesInto`, `acquireNInto`
+- **Allocating methods**: Generator iterators (`availableIndices`, `occupiedIndices`, `Symbol.iterator`) and `acquireN` allocate objects
+- LIFO release behavior provides cache-friendly reuse patterns
 - Efficient search algorithms for finding available slots
 
 Run `deno task example` to see a performance demonstration with ephemeral port allocation.
