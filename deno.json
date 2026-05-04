@@ -43,7 +43,19 @@
     },
     "prep": {
       "description": "Format, lint, and check the codebase",
-      "command": "deno fmt && deno lint && deno check mod.ts src/**/*.ts"
+      "command": "deno fmt && deno lint && deno check mod.ts src/**/*.ts test/**/*.test.ts bench/**/*.ts"
+    },
+    "ci": {
+      "description": "Run tests, static checks, and GC allocation budget checks",
+      "command": "deno task prep && deno test && deno task bench:allocations:check"
+    },
+    "bench:allocations": {
+      "description": "Measure GC allocation pressure for hot BitPool APIs",
+      "command": "deno run --v8-flags=--expose-gc bench/gc_allocations.ts"
+    },
+    "bench:allocations:check": {
+      "description": "Fail if zero-allocation hot paths exceed their GC allocation budgets",
+      "command": "deno run --v8-flags=--expose-gc bench/gc_allocations.ts --check"
     }
   },
   "test": {

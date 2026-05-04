@@ -1875,6 +1875,57 @@ Deno.test("BitPool.releaseAll - nextAvailableIndex should be last released", () 
   assertEquals(pool.nextAvailableIndex, 4);
 });
 
+// releaseMany Tests
+Deno.test("BitPool.releaseMany - should release array-like indices without requiring an iterable", () => {
+  const pool = new BitPool(10);
+  const acquired = pool.acquireN(5);
+
+  pool.releaseMany(acquired);
+
+  assertEquals(pool.availableCount, 10);
+  for (const idx of acquired) {
+    assertEquals(pool.isAvailable(idx), true);
+  }
+});
+
+Deno.test("BitPool.releaseMany - should release only count entries", () => {
+  const pool = new BitPool(10);
+  const acquired = pool.acquireN(5);
+
+  pool.releaseMany(acquired, 3);
+
+  assertEquals(pool.availableCount, 8);
+  assertEquals(pool.isAvailable(0), true);
+  assertEquals(pool.isAvailable(1), true);
+  assertEquals(pool.isAvailable(2), true);
+  assertEquals(pool.isOccupied(3), true);
+  assertEquals(pool.isOccupied(4), true);
+});
+
+Deno.test("BitPool.releaseMany - should work with typed arrays", () => {
+  const pool = new BitPool(10);
+  pool.acquireN(5);
+
+  pool.releaseMany(new Uint32Array([1, 3, 4]));
+
+  assertEquals(pool.availableCount, 8);
+  assertEquals(pool.nextAvailableIndex, 4);
+});
+
+Deno.test("BitPool.releaseMany - should reject invalid counts", () => {
+  const pool = new BitPool(10);
+  assertThrows(
+    () => pool.releaseMany([0], -1),
+    TypeError,
+    '"count" must be a non-negative integer',
+  );
+  assertThrows(
+    () => pool.releaseMany([0], 1.5),
+    TypeError,
+    '"count" must be a non-negative integer',
+  );
+});
+
 // ============================================================================
 // Symbol.toStringTag Tests
 // ============================================================================

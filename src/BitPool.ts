@@ -293,6 +293,25 @@ export class BitPool {
   }
 
   /**
+   * Releases multiple indices from an array-like source without creating an iterator.
+   *
+   * Invalid indices are silently ignored (same behavior as `release()`).
+   * After batch release, `nextAvailableIndex` will be the last valid released index.
+   *
+   * @param indices Array-like source of indices to release
+   * @param count Number of source entries to read (default: `indices.length`)
+   */
+  releaseMany(indices: ArrayLike<number>, count: number = indices.length): void {
+    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError('"count" must be a non-negative integer');
+    }
+    const actualCount = Math.min(count, indices.length);
+    for (let i = 0; i < actualCount; i++) {
+      this.release(indices[i]!);
+    }
+  }
+
+  /**
    * Batch acquire multiple indices with all-or-nothing semantics.
    *
    * @param count The number of indices to acquire

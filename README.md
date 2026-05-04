@@ -217,11 +217,20 @@ pool.release(index);
 
 #### `releaseAll(indices: Iterable<number>): void`
 
-Batch release multiple indices.
+Batch release multiple indices from any iterable. This is ergonomic, but iterable objects may allocate in hot paths.
 
 ```ts
 pool.releaseAll([0, 1, 2, 3]); // Release multiple indices
 pool.releaseAll(acquiredSet);   // Works with Set, Array, or any Iterable
+```
+
+#### `releaseMany(indices: ArrayLike<number>, count?: number): void`
+
+Zero-allocation batch release from an array-like source. Use with a reused `Uint32Array` or `number[]` in hot paths.
+
+```ts
+const count = pool.acquireNInto(buffer);
+pool.releaseMany(buffer, count);
 ```
 
 #### `isAvailable(index: number): boolean`
@@ -545,8 +554,9 @@ BitPool is designed for high-performance scenarios with minimal GC pressure:
 
 - Backed by `Uint32Array` for efficient memory usage
 - Optimized bitwise operations for fast lookups
-- **Zero-allocation methods**: `forEachAvailable`, `forEachOccupied`, `forEachChunk`, `availableIndicesInto`, `occupiedIndicesInto`, `acquireNInto`
+- **Zero-allocation methods**: `forEachAvailable`, `forEachOccupied`, `forEachChunk`, `availableIndicesInto`, `occupiedIndicesInto`, `acquireNInto`, `releaseMany`
 - **Allocating methods**: Generator iterators (`availableIndices`, `occupiedIndices`, `Symbol.iterator`) and `acquireN` allocate objects
+- **Allocation benchmark gate**: `deno task bench:allocations:check` fails if expected hot paths exceed GC allocation budgets
 - LIFO release behavior provides cache-friendly reuse patterns
 - Efficient search algorithms for finding available slots
 
