@@ -508,15 +508,21 @@ Deno.test("BitPool.fromArray - should maintain correct nextAvailableIndex", () =
   assertEquals(pool.nextAvailableIndex, 4); // First available bit after the occupied bits 0-3
 });
 
-Deno.test("BitPool.fromArray - should handle edge case values without validation", () => {
-  // Since validation is deferred to BooleanArray, these values are silently coerced/truncated
-  // NaN becomes 0, negative numbers are bit-truncated
-  const pool1 = BitPool.fromArray(32, [NaN]);
-  assertEquals(pool1.size, 32);
-  assertEquals(pool1.availableCount, 32); // NaN coerces to 0, so all available
+Deno.test("BitPool.fromArray - should reject invalid raw word values", () => {
+  assertThrows(
+    () => BitPool.fromArray(32, [NaN]),
+    TypeError,
+    '"source" must contain only safe integer Uint32 values.',
+  );
 
-  const pool2 = BitPool.fromArray(32, [0]);
-  assertEquals(pool2.availableCount, 32);
+  assertThrows(
+    () => BitPool.fromArray(32, [-1]),
+    RangeError,
+    '"source" values must be greater than or equal to 0.',
+  );
+
+  const pool = BitPool.fromArray(32, [0]);
+  assertEquals(pool.availableCount, 32);
 });
 
 Deno.test("BitPool.fromArray - should handle maximum valid capacity", () => {
@@ -2156,4 +2162,55 @@ Deno.test("BitPool set operations - multi-chunk correctness", () => {
 
   const symDiff = a.symmetricDifference(b);
   assertEquals(symDiff.occupiedCount, 20); // 50-69
+});
+
+Deno.test("BitPool set operations Into - reuse preallocated output pool", () => {
+  const a = new BitPool(64);
+  a.acquireN(4); // 0, 1, 2, 3
+
+  const b = new BitPool(64);
+  b.acquireN(6); // 0, 1, 2, 3, 4, 5
+  b.release(1); // 0, 2, 3, 4, 5
+
+  const out = new BitPool(64);
+  out.fill(); // Verify each operation overwrites prior output state.
+
+  assertEquals(a.intersectInto(b, out), out);
+  assertEquals(out.occupiedCount, 3);
+  assertEquals(out.isOccupied(0), true);
+  assertEquals(out.isOccupied(1), false);
+  assertEquals(out.isOccupied(2), true);
+  assertEquals(out.isOccupied(3), true);
+  assertEquals(out.nextAvailableIndex, 1);
+
+  assertEquals(a.unionInto(b, out), out);
+  assertEquals(out.occupiedCount, 6);
+  assertEquals(out.isOccupied(1), true);
+  assertEquals(out.isOccupied(4), true);
+  assertEquals(out.isOccupied(5), true);
+  assertEquals(out.nextAvailableIndex, 6);
+
+  assertEquals(a.differenceInto(b, out), out);
+  assertEquals(out.occupiedCount, 1);
+  assertEquals(out.isOccupied(1), true);
+  assertEquals(out.nextAvailableIndex, 0);
+
+  assertEquals(a.symmetricDifferenceInto(b, out), out);
+  assertEquals(out.occupiedCount, 3);
+  assertEquals(out.isOccupied(1), true);
+  assertEquals(out.isOccupied(4), true);
+  assertEquals(out.isOccupied(5), true);
+  assertEquals(out.nextAvailableIndex, 0);
+});
+
+Deno.test("BitPool set operations Into - should throw for mismatched output size", () => {
+  const a = new BitPool(32);
+  const b = new BitPool(32);
+  const out = new BitPool(64);
+
+  assertThrows(
+    () => a.unionInto(b, out),
+    RangeError,
+    "Output BitPool size must match for union",
+  );
 });
