@@ -28,10 +28,10 @@ export class BitPool {
   }
 
   /** The maximum safe size of the pool. */
-  static readonly MAX_SAFE_SIZE = BooleanArray.MAX_SAFE_SIZE;
+  static readonly MAX_SAFE_SIZE: number = BooleanArray.MAX_SAFE_SIZE;
 
   /** The maximum safe value for a Uint32Array. */
-  static readonly MAX_SAFE_VALUE = ALL_BITS_TRUE;
+  static readonly MAX_SAFE_VALUE: number = ALL_BITS_TRUE;
 
   /**
    * Creates a new BitPool from an array of uint32 values representing bit patterns.
