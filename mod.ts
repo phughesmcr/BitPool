@@ -6,5 +6,9 @@
  */
 
 import { BitPool } from "./src/BitPool.ts";
+
+/** Default export alias for {@link BitPool}. */
+const defaultExport: typeof BitPool = BitPool;
+
 export { BitPool };
-export default BitPool;
+export default defaultExport;
