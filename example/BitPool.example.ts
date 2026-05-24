@@ -19,7 +19,7 @@ function buildAvailabilityMask(capacity: number, reservedUntil: number): Uint32A
   for (let i = reservedUntil; i < capacity; i++) {
     const chunkIndex: number = i >>> 5; // i / 32
     const bitPosition: number = i & 31; // i % 32
-    mask[chunkIndex] |= (1 << bitPosition);
+    mask[chunkIndex]! |= 1 << bitPosition;
   }
   return mask;
 }
@@ -59,5 +59,3 @@ for (const idx of pool.availableIndices(RESERVED_UNTIL, CAPACITY)) {
   if (sample.length >= 8) break;
 }
 console.log("First available ephemeral ports:", sample);
-
-

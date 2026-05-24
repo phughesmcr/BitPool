@@ -67,8 +67,9 @@ export class BitPool {
   static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
     // Check if capacity is large enough for the array
     capacity = BooleanArray.assertIsSafeSize(capacity);
-    const requiredCapacity = array.length * BooleanArray.BITS_PER_INT;
-    if (requiredCapacity > 0 && capacity < requiredCapacity) {
+    const expectedWordLength = BooleanArray.getChunkCount(capacity);
+    if (array.length > expectedWordLength) {
+      const requiredCapacity = ((array.length - 1) * BooleanArray.BITS_PER_INT) + 1;
       throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
     }
     const arr = BooleanArray.fromUint32Array(capacity, array);
@@ -356,7 +357,7 @@ export class BitPool {
    * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachChunk}.
    */
   *[Symbol.iterator](): IterableIterator<number> {
-    for (let i = 0; i < this.#data.chunkCount; i++) {
+    for (let i = 0; i < this.#data.wordLength; i++) {
       yield this.#data.buffer[i]!;
     }
   }
@@ -468,7 +469,7 @@ export class BitPool {
    */
   forEachChunk(callback: (chunk: number, chunkIndex: number) => void): this {
     const buffer = this.#data.buffer;
-    const len = this.#data.chunkCount;
+    const len = this.#data.wordLength;
     for (let i = 0; i < len; i++) {
       callback(buffer[i]!, i);
     }
