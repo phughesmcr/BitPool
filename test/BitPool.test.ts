@@ -1857,7 +1857,7 @@ Deno.test("BitPool.releaseAll - should work with generator", () => {
   const pool = new BitPool(10);
   pool.acquireN(5);
 
-  function* generateIndices() {
+  function* generateIndices(): IterableIterator<number> {
     yield 0;
     yield 1;
     yield 2;
