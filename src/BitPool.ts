@@ -67,8 +67,9 @@ export class BitPool {
   static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
     // Check if capacity is large enough for the array
     capacity = BooleanArray.assertIsSafeSize(capacity);
-    const requiredCapacity = array.length * BooleanArray.BITS_PER_INT;
-    if (requiredCapacity > 0 && capacity < requiredCapacity) {
+    const expectedWordLength = BooleanArray.getChunkCount(capacity);
+    if (array.length > expectedWordLength) {
+      const requiredCapacity = ((array.length - 1) * BooleanArray.BITS_PER_INT) + 1;
       throw new RangeError(`For the array to fit, "capacity" must be greater than or equal to ${requiredCapacity}`);
     }
     const arr = BooleanArray.fromUint32Array(capacity, array);
