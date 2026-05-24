@@ -9,6 +9,19 @@ A high-performance bit pool for managing resource allocation with efficient memo
   <img src="https://img.shields.io/badge/node-%5E22.0.0-lightgrey?logo=node.js" alt="Node version" />
 </p>
 
+## Index and iteration contracts
+
+**Query** (`isAvailable`, `isOccupied`): throws `TypeError` if the index is not a number or is `NaN`; throws `RangeError` when out of bounds.
+
+**Release** (`release`, `releaseAll`, `releaseMany`): throws `TypeError` on `NaN`; ignores non-safe-integer and out-of-bounds indices; releasing an already-available index is a no-op.
+
+**Iteration:**
+
+- **Zero-allocation:** `forEachAvailable`, `forEachOccupied`, `forEachChunk`, `availableIndicesInto`, `occupiedIndicesInto`
+- **Allocating iterators:** `availableIndices`, `occupiedIndices`, and `[Symbol.iterator]` (chunk values) — same index semantics as the `forEach*` / `*Into` methods
+
+`BitPool.fromArray` is an alias of `fromUint32Array` (same behavior and validation).
+
 ## Features
 
 - **High Performance**: Optimized bitwise operations with minimal GC pressure
@@ -103,7 +116,7 @@ The maximum safe value for a Uint32Array chunk (0xFFFFFFFF).
 
 #### `BitPool.fromArray(capacity: number, array: ArrayLike<number>)`
 
-Creates a BitPool from an array of uint32 values representing bit patterns.  
+Alias of `fromUint32Array`. Creates a BitPool from an array of uint32 values representing bit patterns.  
 Each uint32 value represents 32 bits where `1 = occupied`, `0 = available`.
 
 ```ts
