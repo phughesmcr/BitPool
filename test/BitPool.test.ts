@@ -666,20 +666,20 @@ Deno.test("BitPool - isOccupied should throw TypeError for non-number input", ()
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied("0"),
     TypeError,
-    '"index" must be a safe integer.',
+    '"index" must be a number',
   );
 
   assertThrows(
     // @ts-expect-error - intentionally testing invalid input
     () => pool.isOccupied(null),
     TypeError,
-    '"index" must be a safe integer.',
+    '"index" must be a number',
   );
 
   assertThrows(
     () => pool.isOccupied(NaN),
     TypeError,
-    '"index" must be a safe integer.',
+    '"index" must be a number',
   );
 });
 
@@ -1986,6 +1986,42 @@ Deno.test("BitPool.releaseMany - should reject invalid counts", () => {
     TypeError,
     '"count" must be a non-negative integer',
   );
+});
+
+// ============================================================================
+// Iterator / forEach consistency (refactor regression)
+// ============================================================================
+
+Deno.test("BitPool - generators should match forEach across ranges", () => {
+  const pool = new BitPool(64);
+  pool.acquire();
+  pool.acquire();
+  pool.acquire();
+  pool.release(1);
+
+  const ranges: [number, number][] = [[0, 64], [0, 8], [4, 20], [-3, 10], [50, 100]];
+
+  for (const [start, end] of ranges) {
+    const fromGenerator = Array.from(pool.availableIndices(start, end));
+    const fromForEach: number[] = [];
+    pool.forEachAvailable((i) => fromForEach.push(i), start, end);
+    assertEquals(fromForEach, fromGenerator);
+
+    const occupiedGenerator = Array.from(pool.occupiedIndices(start, end));
+    const occupiedForEach: number[] = [];
+    pool.forEachOccupied((i) => occupiedForEach.push(i), start, end);
+    assertEquals(occupiedForEach, occupiedGenerator);
+  }
+});
+
+Deno.test("BitPool.acquireNInto - should not write -1 when acquire fails unexpectedly", () => {
+  const pool = new BitPool(4);
+  pool.acquireN(4);
+  const out = new Uint32Array(2);
+  const count = pool.acquireNInto(out);
+  assertEquals(count, 0);
+  assertEquals(out[0], 0);
+  assertEquals(out[1], 0);
 });
 
 // ============================================================================

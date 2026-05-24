@@ -12,6 +12,10 @@ import { ALL_BITS_TRUE, andInto, BooleanArray, differenceInto, orInto, xorInto }
  *
  * Internal representation: `false` = available, `true` = occupied.
  *
+ * **Index handling:**
+ * - **Query** (`isAvailable`, `isOccupied`): `TypeError` if the index is not a number or is `NaN`; `RangeError` when out of bounds.
+ * - **Release** (`release`, `releaseAll`, `releaseMany`): `TypeError` on `NaN`; non-safe-integer and out-of-bounds indices are ignored; releasing an already-available index is a no-op.
+ *
  * **Allocation behavior:**
  * - Generator methods (`availableIndices`, `occupiedIndices`, `Symbol.iterator`) allocate iterator objects.
  * - Methods named `forEach*` and `*Into` are truly zero-allocation.
@@ -35,6 +39,7 @@ export class BitPool {
    * @param capacity The total size of the pool
    * @param array The array of uint32 values to use as the initial state
    * @returns A new BitPool
+   * @see {@link fromUint32Array}
    *
    * @example
    * ```ts
@@ -65,7 +70,6 @@ export class BitPool {
    * ```
    */
   static fromUint32Array(capacity: number, array: ArrayLike<number>): BitPool {
-    // Check if capacity is large enough for the array
     capacity = BooleanArray.assertIsSafeSize(capacity);
     const expectedWordLength = BooleanArray.getChunkCount(capacity);
     if (array.length > expectedWordLength) {
@@ -143,17 +147,14 @@ export class BitPool {
       return -1;
     }
     const index = this.#nextAvailableIndex;
-    this.#data.set(index, true); // Mark as occupied
-    this.#availableCount--;
-    this.#nextAvailableIndex = this.findNextAvailable(index, true);
+    this.#occupy(index);
     return index;
   }
 
   /** Clears the pool, making all indices available. */
   clear(): void {
-    this.#data.fill(false); // All available
-    this.#nextAvailableIndex = 0;
-    this.#availableCount = this.#data.size;
+    this.#data.fill(false);
+    this.#resetDerivedState(this.#data.size, 0);
   }
 
   /** Clones the pool. */
@@ -192,9 +193,7 @@ export class BitPool {
    * @throws {RangeError} When index is out of bounds
    */
   isAvailable(index: number): boolean {
-    if (typeof index !== "number" || isNaN(index)) {
-      throw new TypeError('"index" must be a number');
-    }
+    this.#assertQueryableIndex(index);
     return !this.#data.get(index);
   }
 
@@ -202,18 +201,18 @@ export class BitPool {
    * Checks if an index is occupied.
    * @param index The index to check
    * @returns True if the index is occupied
-   * @throws {TypeError} When index is not a safe integer
+   * @throws {TypeError} When index is not a number
    * @throws {RangeError} When index is out of bounds
    */
   isOccupied(index: number): boolean {
+    this.#assertQueryableIndex(index);
     return this.#data.get(index);
   }
 
   /** Fills the pool, marking all indices as occupied. */
   fill(): void {
-    this.#data.fill(true); // All occupied
-    this.#nextAvailableIndex = -1;
-    this.#availableCount = 0;
+    this.#data.fill(true);
+    this.#resetDerivedState(0, -1);
   }
 
   /**
@@ -228,7 +227,6 @@ export class BitPool {
     }
     const currentIndex = startIndex ?? this.#nextAvailableIndex;
 
-    // Ensure we don't search beyond bounds
     if (currentIndex < 0 || currentIndex >= this.#data.size) {
       return this.#data.nextFalsyIndex();
     }
@@ -259,24 +257,7 @@ export class BitPool {
    * @throws {TypeError} If index is NaN
    */
   release(index: number): void {
-    // Throw for NaN specifically as expected by tests
-    if (typeof index !== "number" || isNaN(index)) {
-      throw new TypeError('"index" must be a number');
-    }
-
-    // Handle other invalid inputs gracefully
-    if (!Number.isSafeInteger(index) || index < 0 || index >= this.#data.size) {
-      return; // Ignore invalid indices
-    }
-
-    if (!this.#data.get(index)) {
-      return; // Already available
-    }
-    this.#data.set(index, false); // Mark as available
-    this.#availableCount++;
-
-    // LIFO: Set nextAvailableIndex to the most recently released index
-    this.#nextAvailableIndex = index;
+    this.#tryReleaseIndex(index);
   }
 
   /**
@@ -289,7 +270,7 @@ export class BitPool {
    */
   releaseAll(indices: Iterable<number>): void {
     for (const index of indices) {
-      this.release(index);
+      this.#releaseOneInBatch(index);
     }
   }
 
@@ -308,7 +289,7 @@ export class BitPool {
     }
     const actualCount = Math.min(count, indices.length);
     for (let i = 0; i < actualCount; i++) {
-      this.release(indices[i]!);
+      this.#releaseOneInBatch(indices[i]!);
     }
   }
 
@@ -346,8 +327,12 @@ export class BitPool {
    */
   acquireNInto(out: Uint32Array): number {
     let count = 0;
-    while (count < out.length && !this.isFull) {
-      out[count++] = this.acquire();
+    while (count < out.length && this.#availableCount > 0) {
+      const index = this.acquire();
+      if (index === -1) {
+        break;
+      }
+      out[count++] = index;
     }
     return count;
   }
@@ -357,9 +342,7 @@ export class BitPool {
    * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachChunk}.
    */
   *[Symbol.iterator](): IterableIterator<number> {
-    for (let i = 0; i < this.#data.wordLength; i++) {
-      yield this.#data.buffer[i]!;
-    }
+    yield* this.#chunkValues();
   }
 
   /**
@@ -369,28 +352,7 @@ export class BitPool {
    * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachAvailable}.
    */
   *availableIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
-    const buffer = this.#data.buffer;
-    const size = this.#data.size;
-    const actualStartIndex = Math.max(startIndex, 0);
-    const actualEndIndex = Math.min(endIndex, size);
-    if (actualStartIndex >= actualEndIndex) return;
-    const startChunk = BooleanArray.getChunk(actualStartIndex);
-    const endChunk = BooleanArray.getChunk(actualEndIndex - 1);
-    for (let chunk = startChunk; chunk <= endChunk; chunk++) {
-      const chunkStart = chunk * BooleanArray.BITS_PER_INT;
-      const s = Math.max(actualStartIndex - chunkStart, 0);
-      const e = Math.min(actualEndIndex - chunkStart, BooleanArray.BITS_PER_INT);
-      if (s >= e) continue;
-      const lowerMask = s === 0 ? 0 : ((1 << s) - 1);
-      const upperMask = e === BooleanArray.BITS_PER_INT ? ALL_BITS_TRUE : ((1 << e) - 1);
-      const mask = (upperMask & ~lowerMask) >>> 0;
-      let word = (~buffer[chunk]!) & mask;
-      while (word) {
-        const bit = BooleanArray.getLSBPosition(word);
-        yield chunkStart + bit;
-        word &= word - 1;
-      }
-    }
+    yield* this.#indicesInRange(false, startIndex, endIndex);
   }
 
   /**
@@ -400,28 +362,7 @@ export class BitPool {
    * @note This method allocates an iterator object. For zero-allocation iteration, use {@link forEachOccupied}.
    */
   *occupiedIndices(startIndex: number = 0, endIndex: number = this.#data.size): IterableIterator<number> {
-    const buffer = this.#data.buffer;
-    const size = this.#data.size;
-    const actualStartIndex = Math.max(startIndex, 0);
-    const actualEndIndex = Math.min(endIndex, size);
-    if (actualStartIndex >= actualEndIndex) return;
-    const startChunk = BooleanArray.getChunk(actualStartIndex);
-    const endChunk = BooleanArray.getChunk(actualEndIndex - 1);
-    for (let chunk = startChunk; chunk <= endChunk; chunk++) {
-      const chunkStart = chunk * BooleanArray.BITS_PER_INT;
-      const s = Math.max(actualStartIndex - chunkStart, 0);
-      const e = Math.min(actualEndIndex - chunkStart, BooleanArray.BITS_PER_INT);
-      if (s >= e) continue;
-      const lowerMask = s === 0 ? 0 : ((1 << s) - 1);
-      const upperMask = e === BooleanArray.BITS_PER_INT ? ALL_BITS_TRUE : ((1 << e) - 1);
-      const mask = (upperMask & ~lowerMask) >>> 0;
-      let word = buffer[chunk]! & mask;
-      while (word) {
-        const bit = BooleanArray.getLSBPosition(word);
-        yield chunkStart + bit;
-        word &= word - 1;
-      }
-    }
+    yield* this.#indicesInRange(true, startIndex, endIndex);
   }
 
   /**
@@ -436,10 +377,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): this {
-    const actualStart = Math.max(startIndex, 0);
-    const actualEnd = Math.min(endIndex, this.#data.size);
-    if (actualStart >= actualEnd) return this;
-    this.#data.forEachFalsy(callback, actualStart, actualEnd);
+    const start = Math.max(startIndex, 0);
+    const end = Math.min(endIndex, this.#data.size);
+    if (start >= end) return this;
+    this.#data.forEachFalsy(callback, start, end);
     return this;
   }
 
@@ -455,10 +396,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): this {
-    const actualStart = Math.max(startIndex, 0);
-    const actualEnd = Math.min(endIndex, this.#data.size);
-    if (actualStart >= actualEnd) return this;
-    this.#data.forEachTruthy(callback, actualStart, actualEnd);
+    const start = Math.max(startIndex, 0);
+    const end = Math.min(endIndex, this.#data.size);
+    if (start >= end) return this;
+    this.#data.forEachTruthy(callback, start, end);
     return this;
   }
 
@@ -468,11 +409,7 @@ export class BitPool {
    * @returns this for chaining
    */
   forEachChunk(callback: (chunk: number, chunkIndex: number) => void): this {
-    const buffer = this.#data.buffer;
-    const len = this.#data.wordLength;
-    for (let i = 0; i < len; i++) {
-      callback(buffer[i]!, i);
-    }
+    this.#forEachChunkValue(callback);
     return this;
   }
 
@@ -488,10 +425,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): number {
-    const actualStart = Math.max(startIndex, 0);
-    const actualEnd = Math.min(endIndex, this.#data.size);
-    if (actualStart >= actualEnd) return 0;
-    return this.#data.falsyIndicesInto(out, actualStart, actualEnd);
+    const start = Math.max(startIndex, 0);
+    const end = Math.min(endIndex, this.#data.size);
+    if (start >= end) return 0;
+    return this.#data.falsyIndicesInto(out, start, end);
   }
 
   /**
@@ -506,41 +443,10 @@ export class BitPool {
     startIndex: number = 0,
     endIndex: number = this.#data.size,
   ): number {
-    const actualStart = Math.max(startIndex, 0);
-    const actualEnd = Math.min(endIndex, this.#data.size);
-    if (actualStart >= actualEnd) return 0;
-    return this.#data.truthyIndicesInto(out, actualStart, actualEnd);
-  }
-
-  /** Refreshes cached counts and the next available index after direct buffer writes. */
-  #refreshDerivedState(): void {
-    const occupiedCount = this.#data.getCount(true);
-    this.#availableCount = this.#data.size - occupiedCount;
-    this.#nextAvailableIndex = this.#data.nextFalsyIndex();
-  }
-
-  /**
-   * Internal helper for zero-allocation binary set operations.
-   * @param other The other BitPool
-   * @param out Destination BitPool
-   * @param op Bitwise operation to apply into out
-   * @param opName Name for error messages
-   */
-  #binaryOpInto(
-    other: BitPool,
-    out: BitPool,
-    op: (a: BooleanArray, b: BooleanArray, out: BooleanArray) => BooleanArray,
-    opName: string,
-  ): BitPool {
-    if (this.size !== other.size) {
-      throw new RangeError(`BitPool sizes must match for ${opName}`);
-    }
-    if (this.size !== out.size) {
-      throw new RangeError(`Output BitPool size must match for ${opName}`);
-    }
-    op(this.#data, other.#data, out.#data);
-    out.#refreshDerivedState();
-    return out;
+    const start = Math.max(startIndex, 0);
+    const end = Math.min(endIndex, this.#data.size);
+    if (start >= end) return 0;
+    return this.#data.truthyIndicesInto(out, start, end);
   }
 
   /**
@@ -560,7 +466,7 @@ export class BitPool {
    * ```
    */
   intersect(other: BitPool): BitPool {
-    return this.intersectInto(other, new BitPool(this.size));
+    return this.#allocatingBinary(other, this.intersectInto.bind(this));
   }
 
   /**
@@ -594,7 +500,7 @@ export class BitPool {
    * ```
    */
   union(other: BitPool): BitPool {
-    return this.unionInto(other, new BitPool(this.size));
+    return this.#allocatingBinary(other, this.unionInto.bind(this));
   }
 
   /**
@@ -627,7 +533,7 @@ export class BitPool {
    * ```
    */
   difference(other: BitPool): BitPool {
-    return this.differenceInto(other, new BitPool(this.size));
+    return this.#allocatingBinary(other, this.differenceInto.bind(this));
   }
 
   /**
@@ -661,7 +567,7 @@ export class BitPool {
    * ```
    */
   symmetricDifference(other: BitPool): BitPool {
-    return this.symmetricDifferenceInto(other, new BitPool(this.size));
+    return this.#allocatingBinary(other, this.symmetricDifferenceInto.bind(this));
   }
 
   /**
@@ -675,5 +581,134 @@ export class BitPool {
    */
   symmetricDifferenceInto(other: BitPool, out: BitPool): BitPool {
     return this.#binaryOpInto(other, out, xorInto, "symmetric difference");
+  }
+
+  #clampRange(startIndex: number, endIndex: number): { start: number; end: number } | null {
+    const start = Math.max(startIndex, 0);
+    const end = Math.min(endIndex, this.#data.size);
+    if (start >= end) return null;
+    return { start, end };
+  }
+
+  #assertQueryableIndex(index: number): void {
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
+    }
+  }
+
+  #tryReleaseIndex(index: number): boolean {
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
+    }
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.#data.size) {
+      return false;
+    }
+    if (!this.#data.get(index)) {
+      return false;
+    }
+    this.#releaseOccupied(index);
+    return true;
+  }
+
+  #releaseOneInBatch(index: number): void {
+    if (typeof index !== "number" || isNaN(index)) {
+      throw new TypeError('"index" must be a number');
+    }
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.#data.size) {
+      return;
+    }
+    if (!this.#data.get(index)) {
+      return;
+    }
+    this.#releaseOccupied(index);
+  }
+
+  #occupy(index: number): void {
+    this.#data.set(index, true);
+    this.#availableCount--;
+    this.#nextAvailableIndex = this.findNextAvailable(index, true);
+  }
+
+  #releaseOccupied(index: number): void {
+    this.#data.set(index, false);
+    this.#availableCount++;
+    this.#nextAvailableIndex = index;
+  }
+
+  #resetDerivedState(availableCount: number, nextAvailableIndex: number): void {
+    this.#availableCount = availableCount;
+    this.#nextAvailableIndex = nextAvailableIndex;
+  }
+
+  #refreshDerivedState(): void {
+    const occupiedCount = this.#data.getCount(true);
+    this.#resetDerivedState(this.#data.size - occupiedCount, this.#data.nextFalsyIndex());
+  }
+
+  *#indicesInRange(
+    occupied: boolean,
+    startIndex: number,
+    endIndex: number,
+  ): Generator<number> {
+    const range = this.#clampRange(startIndex, endIndex);
+    if (!range) return;
+    const buffer = this.#data.buffer;
+    const startChunk = BooleanArray.getChunk(range.start);
+    const endChunk = BooleanArray.getChunk(range.end - 1);
+    for (let chunk = startChunk; chunk <= endChunk; chunk++) {
+      const chunkStart = chunk * BooleanArray.BITS_PER_INT;
+      const s = Math.max(range.start - chunkStart, 0);
+      const e = Math.min(range.end - chunkStart, BooleanArray.BITS_PER_INT);
+      if (s >= e) continue;
+      const lowerMask = s === 0 ? 0 : ((1 << s) - 1);
+      const upperMask = e === BooleanArray.BITS_PER_INT ? ALL_BITS_TRUE : ((1 << e) - 1);
+      const mask = (upperMask & ~lowerMask) >>> 0;
+      let word = occupied ? buffer[chunk]! & mask : (~buffer[chunk]!) & mask;
+      while (word) {
+        const bit = BooleanArray.getLSBPosition(word);
+        yield chunkStart + bit;
+        word &= word - 1;
+      }
+    }
+  }
+
+  *#chunkValues(): Generator<number> {
+    const buffer = this.#data.buffer;
+    const len = this.#data.wordLength;
+    for (let i = 0; i < len; i++) {
+      yield buffer[i]!;
+    }
+  }
+
+  #forEachChunkValue(callback: (chunk: number, chunkIndex: number) => void): void {
+    const buffer = this.#data.buffer;
+    const len = this.#data.wordLength;
+    for (let i = 0; i < len; i++) {
+      callback(buffer[i]!, i);
+    }
+  }
+
+  #allocatingBinary(
+    other: BitPool,
+    intoFn: (other: BitPool, out: BitPool) => BitPool,
+  ): BitPool {
+    return intoFn.call(this, other, new BitPool(this.size));
+  }
+
+  #binaryOpInto(
+    other: BitPool,
+    out: BitPool,
+    op: (a: BooleanArray, b: BooleanArray, out: BooleanArray) => BooleanArray,
+    opName: string,
+  ): BitPool {
+    if (this.size !== other.size) {
+      throw new RangeError(`BitPool sizes must match for ${opName}`);
+    }
+    if (this.size !== out.size) {
+      throw new RangeError(`Output BitPool size must match for ${opName}`);
+    }
+    op(this.#data, other.#data, out.#data);
+    out.#refreshDerivedState();
+    return out;
   }
 }
